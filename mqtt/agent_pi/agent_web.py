@@ -1,22 +1,10 @@
 from flask import Flask, render_template, request, redirect, url_for, session, flash
 import socket
-import config
+
 
 app = Flask(__name__)
 app.secret_key = "supersecretkey"  # replace with something secure
 
-# ---------- Helper Function for Socket Communication ----------
-def send_to_master(message):
-    """Send message to Master Pi using sockets and return response."""
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.connect((config.SOCKET_HOST, config.SOCKET_PORT))
-            s.sendall(message.encode())
-            response = s.recv(1024).decode()
-        return response
-    except Exception as e:
-        print(f"Socket Error: {e}")
-        return "Connection error with Master Pi."
 
 # ---------- Routes ----------
 @app.route("/")
@@ -39,22 +27,42 @@ def register():
     return render_template("register.html")
 
 @app.route("/login", methods=["GET", "POST"])
+@app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
         email = request.form["email"]
         password = request.form["password"]
-        return redirect(url_for("home"))
+
+        # Send login request to Master Pi
         msg = f"LOGIN|{email}|{password}"
         response = send_to_master(msg)
 
-        if "success" in response.lower():
+        # Normalize case and spacing
+        response = response.strip().lower()
+
+        # Check Master Pi response
+        if response.startswith("login_success"):
             session["user"] = email
             flash("Login successful!")
-            return redirect(url_for("home"))
-        else:
-            flash(response)
+
+            # Determine role based on Master Pi message
+            if "role=security" in response:
+                return redirect(url_for("security_home"))
+            elif "role=user" in response or "role=student" in response or "role=teacher" in response:
+                return redirect(url_for("home"))
+            else:
+                flash("Unknown role returned by Master Pi.")
+                return redirect(url_for("login"))
+
+        elif response.startswith("login_failed"):
+            reason = response.split("=", 1)[1] if "=" in response else "Invalid credentials"
+            flash(f"Login failed: {reason}")
             return redirect(url_for("login"))
-        
+
+        else:
+            flash("Unexpected response from Master Pi.")
+            return redirect(url_for("login"))
+
     return render_template("login.html")
 
 @app.route("/home")
