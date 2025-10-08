@@ -13,8 +13,8 @@ class Database:
         return conn
 
     def create_table(self, create_table_sql):
-        c = self.conn.cursor()
-        c.execute(create_table_sql)
+        cur = self.conn.cursor()
+        cur.execute(create_table_sql)
 
     def close(self):
         if self.conn:
@@ -122,8 +122,8 @@ def seed_data(db: Database):
     db.create_user(User('student2@test.com', 'student', 'John', 's1111111', 'user'))
 
     # Seed rooms
-    db.create_room(Room('Room 101', 'Available', '1'))
-    db.create_room(Room('Room 102', 'Available', '2'))
+    db.create_room(Room('Science Room', 'Building 52', '20', 'Available', '1'))
+    db.create_room(Room('Art Room', 'Building 90', '25', 'Available', '2'))
     db.conn.commit()
 
 def main():
