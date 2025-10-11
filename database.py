@@ -59,6 +59,7 @@ class Database:
                                             password text NOT NULL,
                                             full_name text NOT NULL,
                                             user_id text NOT NULL UNIQUE,
+                                            user_token VARCHAR(50) NOT NULL,
                                             role text NOT NULL
                                         );"""
 
