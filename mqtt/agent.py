@@ -36,7 +36,7 @@ class Agent:
 
     def _mqtt_subscriber_thread(self):
         try:
-            self.mqtt_client.connect(config.MQTT_BROKER, config.MQTT_PORT, 60)
+            self.mqtt_client.connect(config.MQTT_IP, config.MQTT_PORT, 60)
             self.mqtt_client.loop_forever()
         except Exception as e:
             print(f"MQTT | Error in MQTT subscriber thread: {e}")

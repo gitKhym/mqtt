@@ -1,10 +1,22 @@
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 from flask import Flask, render_template, request, redirect, url_for, session, flash
 import socket
+from config import SOCKET_HOST, SOCKET_PORT
 
 
 app = Flask(__name__)
-app.secret_key = "supersecretkey"  # replace with something secure
 
+app.secret_key = "supersecretkey"
+
+def send_to_master(message):
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.connect((SOCKET_HOST, SOCKET_PORT))
+        s.sendall(message.encode())
+        response = s.recv(1024).decode()
+        return response
 
 # ---------- Routes ----------
 @app.route("/")
@@ -27,7 +39,6 @@ def register():
     return render_template("register.html")
 
 @app.route("/login", methods=["GET", "POST"])
-@app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
         email = request.form["email"]
@@ -42,13 +53,31 @@ def login():
 
         # Check Master Pi response
         if response.startswith("login_success"):
-            session["user"] = email
+            session["user_email"] = email
             flash("Login successful!")
 
-            # Determine role based on Master Pi message
-            if "role=security" in response:
+            # Parse role, user_id, and full_name from Master Pi message
+            response_parts = response.split("|")
+            user_role = "user" # Default role
+            user_id = None
+            full_name = None
+
+            for part in response_parts:
+                if part.startswith("role="):
+                    user_role = part.split("=")[1]
+                elif part.startswith("user_id="):
+                    user_id = part.split("=")[1]
+                elif part.startswith("full_name="):
+                    full_name = part.split("=")[1]
+            
+            session["user_role"] = user_role
+            session["user_id"] = user_id
+            session["full_name"] = full_name
+
+            # Determine redirect based on role
+            if user_role == "security":
                 return redirect(url_for("security_home"))
-            elif "role=user" in response or "role=student" in response or "role=teacher" in response:
+            elif user_role in ["user", "student", "teacher"]:
                 return redirect(url_for("home"))
             else:
                 flash("Unknown role returned by Master Pi.")
@@ -65,17 +94,25 @@ def login():
 
     return render_template("login.html")
 
+@app.route("/security_home")
+def security_home():
+    if "user_email" not in session or session.get("user_role") != "security":
+        return redirect(url_for("login"))
+    return render_template("security_home.html")
+
 @app.route("/home")
 def home():
-    if "user" not in session:
+    if "user_email" not in session:
         return redirect(url_for("login"))
     return render_template("home.html")
 
 @app.route("/logout")
 def logout():
-    session.pop("user", None)
+    session.pop("user_email", None)
+    session.pop("user_id", None)
+    session.pop("user_role", None)
     flash("You have been logged out.")
     return redirect(url_for("index"))
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="0.0.0.0", port=7001, debug=True)
