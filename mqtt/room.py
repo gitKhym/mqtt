@@ -5,11 +5,11 @@ import time
 import config 
 import threading
 import json
-import json
 import sys
-from paho.mqtt.reasoncodes import ReasonCode
-from paho.mqtt.client import Client, MQTTMessage, ConnectFlags
+from paho.mqtt.client import Client, MQTTMessage
 from paho.mqtt.properties import Properties
+import paho.mqtt.client as mqtt
+from typing import Optional, Any
 
 class RoomPi:
     STATUS = ["Available", "In Use", "Maintenance", "Fault"]
@@ -24,6 +24,29 @@ class RoomPi:
         self.sense = SenseHat()
         self.running = True
         self.bookings = {}
+        self.mqtt_client = mqtt.Client()
+        self.mqtt_client.on_connect = self._on_mqtt_connect
+        self.mqtt_client.on_message = self._on_mqtt_message
+
+    def _on_mqtt_connect(self, client: Client, userdata: Any, flags: Any, rc: Any, properties: Optional[Properties]) -> None:
+        if rc == 0:
+            print(f"MQTT | RoomPi {self.id} connected to MQTT")
+            client.subscribe(config.TOPIC_BOOKING_REQUEST)
+            print(f"MQTT | RoomPi {self.id} subscribed to topic: {config.TOPIC_BOOKING_REQUEST}")
+        else:
+            print(f"MQTT | RoomPi {self.id} failed to connect to MQTT")
+
+    def _on_mqtt_message(self, client: Client, userdata: Any, msg: MQTTMessage):
+        print(f"MQTT | RoomPi {self.id} received message on {msg.topic}: {msg.payload.decode()}")
+        if msg.topic == config.TOPIC_BOOKING_REQUEST:
+            try:
+                booking_request = json.loads(msg.payload.decode())
+                if booking_request["op"] == "BOOK_ROOM" and booking_request["room_id"] == self.id:
+                    response = self.book_room(booking_request)
+                    self.mqtt_client.publish(config.TOPIC_BOOKING_RESPONSE, json.dumps(response))
+                    print(f"MQTT | RoomPi {self.id} published booking response: {json.dumps(response)}")
+            except Exception as e:
+                print(f"MQTT | RoomPi {self.id} error processing booking request: {e}")
 
     def get_local_ip(self):
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -146,9 +169,7 @@ class RoomPi:
         req = sc.recv(1024).decode()
         req = json.loads(req)
         msg_dic = {}
-        if req["op"] == "BOOK_ROOM":
-            msg_dic = self.book_room(req)
-        elif req["op"] == "CHECK_IN":
+        if req["op"] == "CHECK_IN":
             msg_dic = self.check_in(req)
         elif req["op"] == "CHECK_OUT":
             msg_dic = self.check_out(req)
@@ -183,14 +204,24 @@ class RoomPi:
         }
         msg = json.dumps(msg_dict)
         self.bookings = json.loads(self.master_connect(msg))
-        #HERE GOES THE MQTT THREAD
+
+        self.mqtt_client.connect(config.MQTT_IP, config.MQTT_PORT, 60)
+        self.mqtt_client.loop_start()
+        print(f"MQTT | RoomPi {self.id} MQTT client started.")
 
         self.enevironment_thread = threading.Thread(target=self.environment_readings)
         self.enevironment_thread.daemon = True
         self.enevironment_thread.start()
 
         self.room_management()
-        
+
+    def book_room(self, msg):
+        datetime_str = msg["datetime"]
+        duration = msg["duration"]
+        token = msg["token"]
+        datetime = float(datetime_str)
+        now = time.time()
+
 
 if __name__ == "__main__":
     rp = RoomPi()

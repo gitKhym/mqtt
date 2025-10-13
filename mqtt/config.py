@@ -1,13 +1,15 @@
 import os
 
 # MQTT Configuration
-MQTT_IP = "localhost"
+SOCKET_HOST = "192.168.1.128"
 MQTT_PORT = 1883
 TOPIC_ALL = "classroom/all"
 TOPIC_SECURITY = "classroom/security"
+TOPIC_BOOKING_REQUEST = "classroom/bookings/requests"
+TOPIC_BOOKING_RESPONSE = "classroom/bookings/responses"
 
 # Socket Configuration
-SOCKET_HOST = "localhost"
+SOCKET_HOST = "192.168.1.128"
 SOCKET_PORT = 12345
 
 # TODO: Database Configuration 

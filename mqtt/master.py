@@ -16,16 +16,23 @@ from paho.mqtt.properties import Properties
 class Master:
     def __init__(self):
         self.mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+        self.mqtt_client.on_connect = self._on_mqtt_connect
+        self.mqtt_client.on_message = self._on_mqtt_message
         self.running = True
         self.socket_server_thread = None
-        self.mqtt_publisher_thread = None
+        self.mqtt_client_thread = None
 
-    # TODO:
     def _on_mqtt_connect(self, client: Client, userdata: Any, flags: ConnectFlags, rc: ReasonCode , properties: Optional[Properties]) -> None:
-        print(f"MQTT | Master connected")
+        if rc == 0:
+            print(f"MQTT | Master connected")
+            client.subscribe(config.TOPIC_BOOKING_REQUEST)
+            client.subscribe(config.TOPIC_BOOKING_RESPONSE)
+            print(f"MQTT | Master subscribed to topics: {config.TOPIC_BOOKING_REQUEST}, {config.TOPIC_BOOKING_RESPONSE}")
+        else:
+            print(f"MQTT | Master failed to connect to MQTT")
 
     def _on_mqtt_message(self, client: Client, userdata: Any, msg: MQTTMessage) -> None:
-        print(f"MQTT | Received message on {msg.topic}: {msg.payload.decode()}")
+        print(f"MQTT | Master received message on {msg.topic}: {msg.payload.decode()}")
 
     def _handle_client(self, conn: socket.socket, addr: Tuple[str, int]) -> None:
         ip = addr[0]
@@ -68,31 +75,31 @@ class Master:
                         print(f"Error connecting: {e}")
             print("Master server stopped.")
 
-    def _mqtt_publisher_thread(self):
+    def _mqtt_client_thread(self):
         try:
             self.mqtt_client.connect(config.MQTT_IP, config.MQTT_PORT, 60)
-            self.mqtt_client.loop_start()
-            print(f"PUBLISHER | Master publisher connected to {config.MQTT_IP}:{config.MQTT_PORT}")
+            self.mqtt_client.loop_start() # Start the MQTT loop in the background
+            print(f"MQTT | Master client connected to {config.MQTT_IP}:{config.MQTT_PORT}")
 
             while self.running:
-                time.sleep(1)
+                time.sleep(1) # Keep the thread alive
         except Exception as e:
-            print(f"PUBLISHER | Error in MQTT publisher thread: {e}")
+            print(f"MQTT | Error in MQTT client thread: {e}")
         finally:
             self.mqtt_client.loop_stop()
             self.mqtt_client.disconnect()
-            print("PUBLISHER | Master MQTT publisher stopped.")
+            print("MQTT | Master MQTT client stopped.")
 
     def start(self):
         print("Starting Master services...")
         self.socket_server_thread = threading.Thread(target=self._socket_server_thread)
-        self.mqtt_publisher_thread = threading.Thread(target=self._mqtt_publisher_thread)
+        self.mqtt_client_thread = threading.Thread(target=self._mqtt_client_thread)
 
         self.socket_server_thread.daemon = True
-        self.mqtt_publisher_thread.daemon = True
+        self.mqtt_client_thread.daemon = True
 
         self.socket_server_thread.start()
-        self.mqtt_publisher_thread.start()
+        self.mqtt_client_thread.start()
         print("Master services started.")
 
         # Keep main thread alive to allow background threads to run

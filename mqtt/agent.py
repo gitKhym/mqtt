@@ -15,7 +15,7 @@ import config
 
 class Agent:
     def __init__(self):
-        self.mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+        self.mqtt_client = mqtt.Client()
         self.mqtt_client.on_connect = self._on_mqtt_connect
         self.mqtt_client.on_message = self._on_mqtt_message
         self.running = True
@@ -31,12 +31,25 @@ class Agent:
             print(f"MQTT | Agent failed to connect to MQTT")
 
     def _on_mqtt_message(self, client: Client, userdata: Any, msg: MQTTMessage):
-        # TODO: Process incoming MQTT messages here
-        pass
+        if msg.topic == config.TOPIC_BOOKING_RESPONSE:
+            print(f"MQTT | Agent received booking response: {msg.payload.decode()}")
+        else:
+            print(f"MQTT | Agent received message on {msg.topic}: {msg.payload.decode()}")
+
+    def publish_booking_request(self, room_id: int, datetime_str: str, duration: int, token: str):
+        booking_details = {
+            "op": "BOOK_ROOM",
+            "room_id": room_id,
+            "datetime": datetime_str,
+            "duration": duration,
+            "token": token
+        }
+        self.mqtt_client.publish(config.TOPIC_BOOKING_REQUEST, json.dumps(booking_details))
+        print(f"MQTT | Agent published booking request for room {room_id}")
 
     def _mqtt_subscriber_thread(self):
         try:
-            self.mqtt_client.connect(config.MQTT_BROKER, config.MQTT_PORT, 60)
+            self.mqtt_client.connect(config.MQTT_IP, config.MQTT_PORT, 60)
             self.mqtt_client.loop_forever()
         except Exception as e:
             print(f"MQTT | Error in MQTT subscriber thread: {e}")
@@ -73,6 +86,17 @@ class Agent:
         self.mqtt_subscriber_thread.start()
         self.socket_client_thread.start()
         print("Agent services started.")
+
+        # Placeholder for testing booking request
+        def test_booking():
+            time.sleep(10) # Wait for MQTT connection to establish
+            # Example booking: Room 1, 30 minutes from now, for 60 minutes
+            now = int(time.time())
+            self.publish_booking_request(1, str(now + 30*60), 60*60, "user123")
+
+        test_booking_thread = threading.Thread(target=test_booking)
+        test_booking_thread.daemon = True
+        test_booking_thread.start()
 
         try:
             while self.running:
