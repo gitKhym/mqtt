@@ -10,6 +10,7 @@ class Database:
 
     def create_connection(self, db_file):
         conn = sqlite3.connect(db_file, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
         return conn
 
     def create_table(self, create_table_sql):
@@ -127,7 +128,7 @@ def seed_data(db: Database):
     db.conn.commit()
 
 def main():
-    database = r"pythonsqlite.db"
+    database = r"database.db"
     db = Database(database)
     db.create_all_tables()
     seed_data(db)
