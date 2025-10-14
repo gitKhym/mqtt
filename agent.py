@@ -21,6 +21,7 @@ class Agent:
         self.running = True
         self.mqtt_subscriber_thread = None
         self.socket_client_thread = None
+        self.rooms = {}  
 
     def _on_mqtt_connect(self, client: Client, userdata: Any, flags: ConnectFlags, rc: ReasonCode, properties: Optional[Properties]) -> None:
         if rc == 0:

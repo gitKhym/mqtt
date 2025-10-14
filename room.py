@@ -101,16 +101,16 @@ class RoomPi:
         token = msg["token"]
         now = time.time()
         if datetime < now:
-            return {"op":"LOG", "type": "failure", "reason": "Cannot book for past time"}
+            return {"op":"LOG", "action" : "booking","room_id":self.id,"type": "failure", "reason": "Cannot book for past time"}
         booked = False
         for b in self.bookings.values():
             if not (datetime + duration <= b["starttime"] or datetime >= b["starttime"] + (b["endtime"] - b["datetime"])):
                 booked = True
                 break
         if booked:
-            return {"op":"LOG", "type": "failure", "reason": "Time slot already booked"}
+            return {"op":"LOG", "action" : "booking","room_id":self.id, "type": "failure", "reason": "Time slot already booked"}
         self.insert_booking({"starttime": datetime, "endtime": datetime + duration, "token": token})
-        return {"op":"LOG", "type": "booking-success", "room_id": self.id, "starttime": datetime, "endtime": datetime + duration, "token": token} 
+        return {"op":"LOG", "action" : "booking", "type": "success", "room_id": self.id, "starttime": datetime, "endtime": datetime + duration, "token": token} 
 
     def check_in(self, msg):
         '''msg = {
@@ -124,8 +124,8 @@ class RoomPi:
                 self.current = self.STATUS[1]  # Set status to "In Use"
                 self.next_user_token = token
                 self.update_leds()
-                return {"op":"LOG", "type": "check-in-success"}
-        return {"op":"LOG",  "type": "failure", "reason": "Invalid token or not within booking time"}
+                return {"op":"LOG", "action" : "check in","room_id":self.id, "type": "success"}
+        return {"op":"LOG", "action" : "check in","room_id":self.id,  "type": "failure", "reason": "Invalid token or not within booking time"}
 
     def check_out(self, msg):
         '''msg = {
@@ -138,8 +138,8 @@ class RoomPi:
             self.next_user_token = None
             self.update_leds()
             self.bookings = {b for b in self.bookings.values if b["token"] != token}  # Remove booking
-            return {"op":"LOG", "type": "check-out-success"}
-        return {"op":"LOG",  "type": "failure", "reason": "Invalid token or not checked in"}
+            return {"op":"LOG", "action" : "check out","room_id":self.id, "type": "success"}
+        return {"op":"LOG", "action" : "check out", "room_id":self.id,  "type": "failure", "reason": "Invalid token or not checked in"}
         
 
     def handle_user(self, sc):
@@ -153,7 +153,9 @@ class RoomPi:
         elif req["op"] == "CHECK_OUT":
             msg_dic = self.check_out(req)
         msg = json.dumps(msg_dic)
-        ans = self.master_connect(msg)
+        resp = self.master_connect(msg)
+        if resp["type" ]== "success":
+            sc.sendall(json.dumps(resp).encode())
           
     def room_management(self):
         '''Acts like a server that listens to user requests host = ip, port = 10000 + room_id'''
@@ -168,6 +170,8 @@ class RoomPi:
         while self.running:
             sc, client_addr = self.socket_users.accept()
             client_thread = threading.Thread(target=self.handle_user, args=(sc))
+            client_thread.daemon = True
+            client_thread.start()
  
 
     def initailization(self, id):
@@ -177,12 +181,16 @@ class RoomPi:
         port = 10000 + self.id
         msg_dict = {
             "op": "ACTIVATED_ROOM",
+            "room_name": f"Room_{self.id}",
             "room_id": self.id,
             "ip": ip,
             "port": port
         }
         msg = json.dumps(msg_dict)
-        self.bookings = json.loads(self.master_connect(msg))
+        msg = json.loads(self.master_connect(msg))
+        if msg["type"] == "success":
+            self.bookings = msg["bookings"]
+
         #HERE GOES THE MQTT THREAD
 
         self.enevironment_thread = threading.Thread(target=self.environment_readings)

@@ -1,5 +1,7 @@
+from agent import Agent
 import sys
 import os
+import json
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from flask import Flask, render_template, request, redirect, url_for, session, flash
@@ -10,6 +12,7 @@ from config import SOCKET_HOST, SOCKET_PORT
 app = Flask(__name__)
 
 app.secret_key = "supersecretkey"
+rooms = {}
 
 def send_to_master(message):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -31,11 +34,28 @@ def register():
         password = request.form["password"]
         unique_id = request.form["unique_id"]
 
-        msg = f"REGISTER|{email}|{password}|{full_name}|{unique_id}"
-        response = send_to_master(msg)
+        msg_dict = {
+            "op": "REGISTER",
+            "Full_Name": full_name,
+            "Email": email,
+            "Password": password,
+            "Unique_ID": unique_id}
+        msg = json.dumps(msg_dict)
+        response = json.loads(send_to_master(msg))
+        if response["type"] == "success":
+            session["user_email"] = email
+            session["rooms"] = response["rooms"]
+            session["user_role"] = "User"
+            session["user_id"] = response["user_id"]
+            session["full_name"] = full_name
+            session["token"] = response["user_token"]
+            flash("registration succesful")
+            return redirect(url_for("home"))
+        else:
+            rsp = response["reason"]
+            flash(rsp)
+            return redirect(url_for("register"))
 
-        flash(response)
-        return redirect(url_for("login"))
     return render_template("register.html")
 
 @app.route("/login", methods=["GET", "POST"])
@@ -45,34 +65,31 @@ def login():
         password = request.form["password"]
 
         # Send login request to Master Pi
-        msg = f"LOGIN|{email}|{password}"
-        response = send_to_master(msg)
+        msg_json = {
+            "op": "LOGIN",
+            "Email": email,
+            "Password": password
+        }
+        msg = json.dumps(msg_json)
+        response = json.loads(send_to_master(msg))
 
-        # Normalize case and spacing
-        response = response.strip().lower()
+        
 
         # Check Master Pi response
-        if response.startswith("login_success"):
+        if response['type']=="success":
             session["user_email"] = email
             flash("Login successful!")
 
-            # Parse role, user_id, and full_name from Master Pi message
-            response_parts = response.split("|")
-            user_role = "user" # Default role
-            user_id = None
-            full_name = None
-
-            for part in response_parts:
-                if part.startswith("role="):
-                    user_role = part.split("=")[1]
-                elif part.startswith("user_id="):
-                    user_id = part.split("=")[1]
-                elif part.startswith("full_name="):
-                    full_name = part.split("=")[1]
+          
+            user_role = response["role"]
+            user_id = response["user_id"]
+            full_name = response["full_name"]
+            token = response["user_token"]
             
             session["user_role"] = user_role
             session["user_id"] = user_id
             session["full_name"] = full_name
+            session["token"] = token
 
             # Determine redirect based on role
             if user_role == "security":
@@ -83,8 +100,8 @@ def login():
                 flash("Unknown role returned by Master Pi.")
                 return redirect(url_for("login"))
 
-        elif response.startswith("login_failed"):
-            reason = response.split("=", 1)[1] if "=" in response else "Invalid credentials"
+        elif response["type"] == "failure":
+            reason = response["reason"]
             flash(f"Login failed: {reason}")
             return redirect(url_for("login"))
 
@@ -102,7 +119,7 @@ def security_home():
 
 @app.route("/home")
 def home():
-    if "user_email" not in session:
+    if "token" not in session:
         return redirect(url_for("login"))
     return render_template("home.html")
 
