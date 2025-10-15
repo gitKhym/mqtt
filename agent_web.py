@@ -162,7 +162,7 @@ def booking():
 
         booking_request = {
             "op": "BOOK_ROOM",
-            "starttime": starttime.isoformat,
+            "starttime": starttime.isoformat(),
             "duration": duration_hours * 3600,  
             "token": session["token"]
         }
@@ -172,14 +172,14 @@ def booking():
         print(room_port)
         msg = json.dumps(booking_request)
         print(msg)
-        #response = json.loads(send_to_room(room_ip,room_port,msg))
+        response = json.loads(send_to_room(room_ip,room_port,msg))
 
         if response["type"] == "success":
             flash(f"Room booked successfully from {starttime} for {duration_hours} hours.")
         else:
             flash(f"Booking failed: {response.get('reason', 'Unknown error')}")
 
-        return redirect(url_for("booking"))
+        return redirect(url_for("home"))
 
     rooms = session.get("rooms", {})
     print(rooms)
