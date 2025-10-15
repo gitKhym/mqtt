@@ -66,7 +66,7 @@ class Database:
 
     def create_all_tables(self):
         sql_create_users_table = """CREATE TABLE IF NOT EXISTS users (
-                                            id integer PRIMARY KEY,
+                                            id integer PRIMARY KEY autoincrement,
                                             email text NOT NULL UNIQUE,
                                             password text NOT NULL,
                                             full_name text NOT NULL,
@@ -76,13 +76,13 @@ class Database:
                                         );"""
 
         sql_create_rooms_table = """CREATE TABLE IF NOT EXISTS rooms (
-                                        id integer PRIMARY KEY,
+                                        id integer PRIMARY KEY autoincrement,
                                         room_name text NOT NULL UNIQUE,
                                         status text NOT NULL
                                     );"""
 
         sql_create_bookings_table = """CREATE TABLE IF NOT EXISTS bookings (
-                                        id integer PRIMARY KEY,
+                                        id integer PRIMARY KEY autoincrement,
                                         user_id integer NOT NULL,
                                         room_id integer NOT NULL,
                                         start_time datetime NOT NULL,
@@ -93,7 +93,7 @@ class Database:
                                     );"""
 
         sql_create_sensor_data_table = """CREATE TABLE IF NOT EXISTS sensor_data (
-                                            id integer PRIMARY KEY,
+                                            id integer PRIMARY KEY  autoincrement,
                                             room_id integer NOT NULL,
                                             timestamp datetime NOT NULL,
                                             temperature real NOT NULL,

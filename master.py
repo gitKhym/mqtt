@@ -1,3 +1,4 @@
+from datetime import datetime
 import sys
 import os
 from database import Database
@@ -185,7 +186,7 @@ class Master:
                     msg = f"User {log['user_id']} logged in successfully."
                     self.db.create_log(log["user_id"], "log in", msg)
                 elif log["action"]=="room connection":
-                    msg = f"Room {log['room_id']} connected successfully."
+                    msg = f"Room {log['room id']} connected successfully."
                     self.db.create_log(None, "room connection", msg)
                 elif log["action"]=="check in":
                     msg = f"User checked in to room {log['room_id']} successfully."
@@ -223,12 +224,13 @@ class Master:
             temperature = request["temperature"]
             humidity = request["humidity"]
             pressure = request["pressure"]
-            timestamp = request["timestamp"]
+            status = request["status"]
+            timestamp = datetime.fromtimestamp(request["timestamp"])
 
             # Update latest values in rooms table
             self.db.conn.execute(
-                "UPDATE rooms SET temperature=?, humidity=?, pressure=? WHERE id=?",
-                (temperature, humidity, pressure, room_id)
+                "UPDATE rooms SET status = ? WHERE id=?",
+                (status, room_id)
             )
             # Insert historical data into sensor_data table
             self.db.conn.execute(

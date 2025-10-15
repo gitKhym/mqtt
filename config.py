@@ -7,7 +7,7 @@ TOPIC_ALL = "classroom/all"
 TOPIC_SECURITY = "classroom/security"
 
 # Socket Configuration
-SOCKET_HOST = "localhost"
+SOCKET_HOST = "0.0.0.0"
 SOCKET_PORT = 12345
 
 # TODO: Database Configuration 

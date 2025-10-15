@@ -7,10 +7,6 @@ import threading
 import json
 import json
 import sys
-from paho.mqtt.reasoncodes import ReasonCode
-from paho.mqtt.client import Client, MQTTMessage, ConnectFlags
-from paho.mqtt.properties import Properties
-
 class RoomPi:
     STATUS = ["Available", "In Use", "Maintenance", "Fault"]
     COLORS = [(0,255,0), (255,255,0), (255,165,0), (255,0,0)]
@@ -74,7 +70,7 @@ class RoomPi:
             temperature = self.sense.get_temperature()
             humidity = self.sense.get_humidity()
             pressure = self.sense.get_pressure()
-            timestamp = int(time.time())
+            timestamp = time.time()
             self.update_leds()
 
             msg_dict = {
@@ -83,7 +79,8 @@ class RoomPi:
                 "timestamp": timestamp,
                 "temperature": temperature,
                 "humidity": humidity,
-                "pressure": pressure
+                "pressure": pressure,
+                "status": self.current
             }
             msg = json.dumps(msg_dict)
             self.master_connect(msg)
@@ -169,7 +166,7 @@ class RoomPi:
 
         while self.running:
             sc, client_addr = self.socket_users.accept()
-            client_thread = threading.Thread(target=self.handle_user, args=(sc))
+            client_thread = threading.Thread(target=self.handle_user, args=(sc,))
             client_thread.daemon = True
             client_thread.start()
  
