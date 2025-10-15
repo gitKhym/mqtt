@@ -45,7 +45,7 @@ class RoomPi:
             print(f"SOCKET (Room) | ERROR: {e}")
             sys.exit(1)
         sd.sendall(message.encode())
-        ans = sd.recv(4096).decode
+        ans = sd.recv(4096).decode()  
         sd.close()
         return ans
 
@@ -201,5 +201,8 @@ class RoomPi:
         
 
 if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print("Usage: python3 room.py <room_id>")
+        sys.exit(1)
     rp = RoomPi()
     rp.initailization(sys.argv[1])

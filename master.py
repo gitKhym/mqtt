@@ -218,8 +218,32 @@ class Master:
                 response = self.book_room(request)
             else:
                 response = request
+        elif request["op"] == "SENSOR_DATA":
+            room_id = request["room_id"]
+            temperature = request["temperature"]
+            humidity = request["humidity"]
+            pressure = request["pressure"]
+            timestamp = request["timestamp"]
+
+            # Update latest values in rooms table
+            self.db.conn.execute(
+                "UPDATE rooms SET temperature=?, humidity=?, pressure=? WHERE id=?",
+                (temperature, humidity, pressure, room_id)
+            )
+            # Insert historical data into sensor_data table
+            self.db.conn.execute(
+                "INSERT INTO sensor_data (room_id, timestamp, temperature, humidity, pressure) VALUES (?, ?, ?, ?, ?)",
+                (room_id, timestamp, temperature, humidity, pressure)
+            )
+            self.db.conn.commit()
+            response = {
+                "op": "LOG",
+                "action": "sensor_update",
+                "type": "success",
+                "room_id": room_id
+            }
         else:
-            response = {"op":"LOG", "action" : "unknown", "type": "failure", "reason": "Unknown operation"}
+            response = {"op": request.get("op"), "type": "failure", "reason": "Unknown operation"}
         self.log_create(response)
         response_str = json.dumps(response)
         conn.sendall(response_str.encode())

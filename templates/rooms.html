@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Room Sensor Data</title>
+</head>
+<body>
+    <h1>Room Sensor Data</h1>
+    <table border="1">
+        <tr>
+            <th>Room ID</th>
+            <th>Status</th>
+            <th>Temperature (°C)</th>
+            <th>Humidity (%)</th>
+            <th>Pressure (hPa)</th>
+            <th>Last Read Time</th>
+        </tr>
+        {% for room in rooms %}
+        <tr>
+            <td>{{ room.id }}</td>
+            <td>{{ room.status }}</td>
+            <td>{{ room.temperature }}</td>
+            <td>{{ room.humidity }}</td>
+            <td>{{ room.pressure }}</td>
+            <td>
+                {% if room.timestamp %}
+                    {{ room.timestamp | datetimeformat }}
+                {% else %}
+                    N/A
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </table>
+
+    <h2>Sensor History for Room 101</h2>
+    <table border="1" id="sensor-history-table">
+        <tr>
+            <th>Timestamp</th>
+            <th>Temperature (°C)</th>
+            <th>Humidity (%)</th>
+            <th>Pressure (hPa)</th>
+        </tr>
+    </table>
+    <script>
+    function fetchSensorHistory(roomId) {
+        fetch(`/sensor_history/${roomId}`)
+            .then(response => response.json())
+            .then(data => {
+                let rows = "";
+                for (const entry of data) {
+                    rows += `<tr>
+                        <td>${new Date(entry.timestamp * 1000).toLocaleString()}</td>
+                        <td>${entry.temperature.toFixed(2)}</td>
+                        <td>${entry.humidity.toFixed(2)}</td>
+                        <td>${entry.pressure.toFixed(2)}</td>
+                    </tr>`;
+                }
+                document.getElementById("sensor-history-table").innerHTML += rows;
+            });
+    }
+    fetchSensorHistory(101); 
+    </script>
+</body>
+</html>
