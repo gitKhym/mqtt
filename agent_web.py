@@ -187,8 +187,16 @@ def booking():
 
     @app.route("/my-bookings")
     def my_bookings():
-        pass;
-
+        if "token" not in session:
+            return redirect(url_for("login"))
+        # Fetch bookings from Master Pi
+        msg = {
+            "op": "GET_BOOKINGS",
+            "token": session["token"]
+        }
+        response = json.loads(send_to_master(json.dumps(msg)))
+        if response["type"] == "success":
+            bookings = response["bookings"]
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=7001, debug=True)

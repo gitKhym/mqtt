@@ -363,7 +363,6 @@ class RoomPi:
                 self.bookings = OrderedDict(sorted(self.bookings.items(), key=lambda kv: kv[1]['starttime']))
 
         # start environment thread
-        print(self.bookings)
         self.environment_thread = threading.Thread(target=self.environment_readings)
         self.environment_thread.daemon = True
         self.environment_thread.start()

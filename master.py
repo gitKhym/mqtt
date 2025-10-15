@@ -186,6 +186,69 @@ class Master:
                 "room_id": room_id, "reason": f"Booking failed: {e}"
             }
 
+    def get_bookings(self, token: str):
+        with self.db_lock:
+            bookings_data = self.db.conn.execute(
+                "SELECT * FROM bookings WHERE token=?",
+                (token,)
+            ).fetchall()
+        bookings_list = []
+        for booking in bookings_data:
+            if booking["status"] is 'booked' or booking["status"] is 'checked in':
+                bookings_list.append({
+                    "booking_id": booking["id"],
+                    "room_id": booking["room_id"],
+                    "start_time": booking["start_time"],
+                    "end_time": booking["end_time"],
+                    "status": booking["status"]
+                })
+        return {"op": "LOG", "action": "fetch_bookings", "type": "success", "bookings": bookings_list}
+
+    def check_in(self, request: dict):
+        with self.db_lock:
+            booking_id = request["booking_id"]
+            booking = self.db.conn.execute(
+                "SELECT * FROM bookings WHERE id=? and status='booked'",
+                (booking_id,)
+            ).fetchone()
+            if not booking:
+                return {
+                    "op": "LOG", "action": "check in", "type": "failure",
+                    "reason": "Check-in failed: Invalid booking ID or already checked in/out"
+                }
+            else:
+                self.db.conn.execute(
+                            "UPDATE booking SET status = ? WHERE id=?",
+                            ("checked in", booking_id)
+                        )
+                self.db.conn.commit()
+                return {
+                    "op": "LOG", "action": "check in", "type": "success",
+                    "message": "Check-in successful", "booking_id": booking_id
+                }   
+    def check_out(self, request: dict):
+        with self.db_lock:
+            booking_id = request["booking_id"]
+            booking = self.db.conn.execute(
+                "SELECT * FROM bookings WHERE id=? and status='checked in'",
+                (booking_id,)
+            ).fetchone()
+            if not booking:
+                return {
+                    "op": "LOG", "action": "check out", "type": "failure",
+                    "reason": "Check-out failed: Invalid booking ID or not checked in"
+                }
+            else:
+                self.db.conn.execute(
+                            "UPDATE booking SET status = ? WHERE id=?",
+                            ("checked out", booking_id)
+                        )
+                self.db.conn.commit()
+                return {
+                    "op": "LOG", "action": "check out", "type": "success",
+                    "message": "Check-out successful", "booking_id": booking_id
+                }
+
     # -------------------------
     # Logging Operations
     # -------------------------
@@ -233,6 +296,10 @@ class Master:
             elif request["op"] == "LOG":
                 if request["type"] == "success" and request["action"] == "booking":
                     response = self.book_room(request)
+                elif request["type"] == "success" and request["action"] == "check in":
+                    response  = self.check_in(request)
+                elif request["type"] == "success" and request["action"] == "check out":
+                    response = self.check_out(request)
                 else:
                     response = request
             elif request["op"] == "SENSOR_DATA":
