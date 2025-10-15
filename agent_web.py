@@ -3,10 +3,11 @@ import sys
 import os
 import json
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
+from datetime import datetime, timedelta
 from flask import Flask, render_template, request, redirect, url_for, session, flash
 import socket
 from config import SOCKET_HOST, SOCKET_PORT
+
 
 
 app = Flask(__name__)
@@ -20,6 +21,17 @@ def send_to_master(message):
         s.sendall(message.encode())
         response = s.recv(1024).decode()
         return response
+
+def send_to_room(ip, port, message):
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        try:
+            s.connect((ip, port))
+            s.sendall(message.encode())
+            response = s.recv(4096).decode()
+            return response
+        except Exception as e:
+            print(f"Error connecting to room at {ip}:{port} - {e}")
+            return None
 
 # ---------- Routes ----------
 @app.route("/")
@@ -88,6 +100,7 @@ def login():
             
             session["user_role"] = user_role
             session["user_id"] = user_id
+            session["rooms"] = response["rooms"]
             session["full_name"] = full_name
             session["token"] = token
 
@@ -131,39 +144,47 @@ def logout():
     flash("You have been logged out.")
     return redirect(url_for("index"))
 
-@app.route("/book-a-room", methods=["GET", "POST"])
+
+
+@app.route("/booking", methods=["GET", "POST"])
 def booking():
     if "token" not in session:
         return redirect(url_for("login"))
 
     if request.method == "POST":
         room_id = request.form["room_id"]
-        date = request.form["date"]
-        start_time = request.form["start_time"]
-        end_time = request.form["end_time"]
+        starttime_str = request.form["starttime"]
+        duration_hours = int(request.form["duration"])
 
-        msg_dict = {
+        # Convert and compute endtime
+        starttime = datetime.fromisoformat(starttime_str)
+
+
+        booking_request = {
             "op": "BOOK_ROOM",
-            "User_ID": session["user_id"],
-            "Token": session["token"],
-            "Room_ID": room_id,
-            "Date": date,
-            "Start_Time": start_time,
-            "End_Time": end_time
+            "starttime": starttime.isoformat,
+            "duration": duration_hours * 3600,  
+            "token": session["token"]
         }
-        msg = json.dumps(msg_dict)
-        response = json.loads(send_to_master(msg))
+        room_ip = session["rooms"][f"{room_id}"]["ip"]
+        print(room_ip)
+        room_port = session["rooms"][f"{room_id}"]["port"]
+        print(room_port)
+        msg = json.dumps(booking_request)
+        print(msg)
+        #response = json.loads(send_to_room(room_ip,room_port,msg))
 
         if response["type"] == "success":
-            flash("Room booked successfully!")
-            return redirect(url_for("my_bookings"))
+            flash(f"Room booked successfully from {starttime} for {duration_hours} hours.")
         else:
-            reason = response.get("reason", "Unknown error")
-            flash(f"Failed to book room: {reason}")
-            return redirect(url_for("booking"))
+            flash(f"Booking failed: {response.get('reason', 'Unknown error')}")
+
+        return redirect(url_for("booking"))
 
     rooms = session.get("rooms", {})
-    return render_template("book_a_room.html", rooms=rooms)
+    print(rooms)
+    return render_template("book_room.html", rooms=rooms)
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=7001, debug=True)

@@ -1,12 +1,14 @@
-from typing import OrderedDict
+from datetime import datetime, timedelta
 import socket
 from sense_hat import SenseHat
 import time
-import config 
+import config
 import threading
 import json
-import json
 import sys
+from collections import OrderedDict
+import traceback
+
 class RoomPi:
     STATUS = ["Available", "In Use", "Maintenance", "Fault"]
     COLORS = [(0,255,0), (255,255,0), (255,165,0), (255,0,0)]
@@ -14,17 +16,20 @@ class RoomPi:
     def __init__(self):
         self.current = self.STATUS[0]
         self.next_user_token = None
-        self.enevironment_thread = None
+        self.environment_thread = None
         self.id  = None
-        self.socket_users = None 
+        self.socket_users = None
         self.sense = SenseHat()
         self.running = True
-        self.bookings = {}
+        # bookings is an OrderedDict keyed by ISO starttime string -> {starttime: datetime, endtime: datetime, token: str}
+        self.bookings = OrderedDict()
+        # Lock to protect access to bookings/current/next_user_token
+        self.lock = threading.RLock()
 
     def get_local_ip(self):
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
-            # No tiene que existir el host, solo fuerza a usar la interfaz activa
+            # doesn't need to exist — forces use of active interface
             s.connect(("8.8.8.8", 80))
             ip = s.getsockname()[0]
         except Exception:
@@ -33,129 +38,266 @@ class RoomPi:
             s.close()
         return ip
 
-    def master_connect(self, message):
-        sd = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    def master_connect(self, message, timeout=5):
+        """
+        Send message (dict or JSON string) to master; returns a dict response.
+        Handles socket exceptions and returns an error dict on failure.
+        """
         try:
-            sd.connect((config.SOCKET_HOST, config.SOCKET_PORT))
+            if isinstance(message, dict):
+                payload = json.dumps(message)
+            else:
+                payload = str(message)
+
+            sd = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sd.settimeout(timeout)
+            try:
+                sd.connect((config.SOCKET_HOST, config.SOCKET_PORT))
+            except Exception as e:
+                return {"type": "failure", "reason": f"connect error: {e}"}
+            try:
+                sd.sendall(payload.encode())
+                data = b""
+                # receive until socket closes or timeout
+                while True:
+                    try:
+                        chunk = sd.recv(4096)
+                        if not chunk:
+                            break
+                        data += chunk
+                    except socket.timeout:
+                        break
+                if not data:
+                    return {"type": "failure", "reason": "no response from master"}
+                try:
+                    resp = json.loads(data.decode())
+                    return resp
+                except Exception:
+                    # fallback: return raw string in a dict
+                    return {"type": "success", "raw": data.decode()}
+            finally:
+                sd.close()
         except Exception as e:
-            print(f"SOCKET (Room) | ERROR: {e}")
-            sys.exit(1)
-        sd.sendall(message.encode())
-        ans = sd.recv(4096).decode()  
-        sd.close()
-        return ans
+            return {"type": "failure", "reason": f"master_connect exception: {e}", "trace": traceback.format_exc()}
 
     def update_leds(self):
-        color = self.COLORS[self.STATUS.index(self.current)]
-        self.sense.clear(color)
+        with self.lock:
+            color = self.COLORS[self.STATUS.index(self.current)]
+        try:
+            self.sense.clear(color)
+        except Exception:
+            # In case sense hat isn't available (e.g., during testing), ignore errors.
+            pass
 
-    def insert_booking(self, booking):
-         # Insert the new booking in the correct position to maintain sorted order by starttime
-        inserted = False
-        newDict = {}
-        for b in self.bookings:
-            if not inserted and booking["starttime"] < b["starttime"]:
-                bkey = f"booking_{booking['starttime']}"
-                newDict[bkey] = booking
-                inserted = True
-            key = f"booking_{b['starttime']}"
-            newDict[key] = b
-        if not inserted:
-            bkey = f"booking_{booking['starttime']}"
-            newDict[bkey] = booking
-        self.bookings = newDict
+    def insert_booking(self, booking: dict):
+        """
+        Insert booking (with datetime objects) keeping bookings ordered by starttime.
+        Booking dict expected: {"starttime": datetime, "endtime": datetime, "token": str}
+        """
+        with self.lock:
+            # create a key based on ISO start time (stable ordering)
+            key = f"booking_{booking['starttime'].isoformat()}"
+            # Add then sort by starttime
+            self.bookings[key] = booking
+            # Rebuild ordered dict sorted by starttime
+            sorted_items = sorted(self.bookings.items(), key=lambda kv: kv[1]['starttime'])
+            self.bookings = OrderedDict(sorted_items)
 
     def environment_readings(self):
+        """
+        Runs in its own thread. Sends environment data regularly.
+        Thread catches exceptions to avoid silent crash.
+        """
         while self.running:
-            temperature = self.sense.get_temperature()
-            humidity = self.sense.get_humidity()
-            pressure = self.sense.get_pressure()
-            timestamp = time.time()
-            self.update_leds()
+            try:
+                # SenseHat reads; may raise in some environments
+                try:
+                    temperature = self.sense.get_temperature()
+                    humidity = self.sense.get_humidity()
+                    pressure = self.sense.get_pressure()
+                except Exception:
+                    # fallback values if sensing fails
+                    temperature = None
+                    humidity = None
+                    pressure = None
 
-            msg_dict = {
-                "op": "SENSOR_DATA",
-                "room_id": self.id,
-                "timestamp": timestamp,
-                "temperature": temperature,
-                "humidity": humidity,
-                "pressure": pressure,
-                "status": self.current
-            }
-            msg = json.dumps(msg_dict)
-            self.master_connect(msg)
-            time.sleep(10)  # Send data every 10 seconds
+                timestamp = time.time()
+                # update LEDs from current state
+                try:
+                    self.update_leds()
+                except Exception:
+                    pass
 
-    def book_room(self, msg):
-        '''msg = {
-            "op": "BOOK_ROOM",
-            "datetime": datetime,
-            "duration": duration,
-            "token": token
-        }'''
-        datetime = msg["datetime"]
-        duration = msg["duration"]
-        token = msg["token"]
-        now = time.time()
-        if datetime < now:
-            return {"op":"LOG", "action" : "booking","room_id":self.id,"type": "failure", "reason": "Cannot book for past time"}
-        booked = False
-        for b in self.bookings.values():
-            if not (datetime + duration <= b["starttime"] or datetime >= b["starttime"] + (b["endtime"] - b["datetime"])):
-                booked = True
-                break
-        if booked:
-            return {"op":"LOG", "action" : "booking","room_id":self.id, "type": "failure", "reason": "Time slot already booked"}
-        self.insert_booking({"starttime": datetime, "endtime": datetime + duration, "token": token})
-        return {"op":"LOG", "action" : "booking", "type": "success", "room_id": self.id, "starttime": datetime, "endtime": datetime + duration, "token": token} 
+                with self.lock:
+                    status = self.current
+                    room_id = self.id
 
-    def check_in(self, msg):
-        '''msg = {
-            "op": "CHECK_IN",
-            "token": token
-        }'''
-        token = msg["token"]
-        now = time.time()
-        for b in self.bookings.values:
-            if b["token"] == token and b["starttime"] <= now < b["endtime"]:
-                self.current = self.STATUS[1]  # Set status to "In Use"
-                self.next_user_token = token
+                msg_dict = {
+                    "op": "SENSOR_DATA",
+                    "room_id": room_id,
+                    "timestamp": timestamp,
+                    "temperature": temperature,
+                    "humidity": humidity,
+                    "pressure": pressure,
+                    "status": status
+                }
+                resp = self.master_connect(msg_dict)
+                # we ignore resp content for now; but log failures
+                if resp.get("type") == "failure":
+                    print(f"MASTER(SENSOR) | {resp.get('reason')}")
+            except Exception:
+                print("environment_readings exception:", traceback.format_exc())
+            # Sleep but allow quicker shutdown by sleeping in short increments
+            sleep_total = 10
+            slept = 0
+            while self.running and slept < sleep_total:
+                time.sleep(0.5)
+                slept += 0.5
+
+    def book_room(self, msg: dict):
+        """
+        msg expects:
+        {
+            "op":"BOOK_ROOM",
+            "starttime":"2025-10-15T19:00:00",
+            "duration":3600,
+            "token":"abc"
+        }
+        """
+        try:
+            starttime = datetime.fromisoformat(msg["starttime"])
+            duration_sec = int(msg["duration"])
+            endtime = starttime + timedelta(seconds=duration_sec)
+            token = msg["token"]
+        except Exception as e:
+            return {"op": "LOG", "action": "booking", "room_id": self.id,
+                    "type": "failure", "reason": f"bad payload: {e}"}
+
+        now = datetime.now()
+        if starttime < now:
+            return {"op": "LOG", "action": "booking", "room_id": self.id,
+                    "type": "failure", "reason": "Cannot book for past time"}
+
+        with self.lock:
+            # Check for overlap
+            for b in self.bookings.values():
+                if not (endtime <= b["starttime"] or starttime >= b["endtime"]):
+                    return {"op": "LOG", "action": "booking", "room_id": self.id,
+                            "type": "failure", "reason": "Time slot already booked"}
+
+            booking_entry = {"starttime": starttime, "endtime": endtime, "token": token}
+            self.insert_booking(booking_entry)
+
+        return {"op": "LOG", "action": "booking", "type": "success", "room_id": self.id,
+                "starttime": starttime.isoformat(), "endtime": endtime.isoformat(), "token": token}
+
+    def check_in(self, msg: dict):
+        token = msg.get("token")
+        now = datetime.now()
+        with self.lock:
+            for b in self.bookings.values():
+                if b["token"] == token and b["starttime"] <= now < b["endtime"]:
+                    self.current = self.STATUS[1]  # In Use
+                    self.next_user_token = token
+                    self.update_leds()
+                    return {"op": "LOG", "action": "check in", "room_id": self.id, "type": "success"}
+        return {"op": "LOG", "action": "check in", "room_id": self.id,
+                "type": "failure", "reason": "Invalid token or not within booking time"}
+
+    def check_out(self, msg: dict):
+        token = msg.get("token")
+        with self.lock:
+            # Must be the same user currently checked in
+            if token == self.next_user_token:
+                self.current = self.STATUS[0]  # Available
+                self.next_user_token = None
                 self.update_leds()
-                return {"op":"LOG", "action" : "check in","room_id":self.id, "type": "success"}
-        return {"op":"LOG", "action" : "check in","room_id":self.id,  "type": "failure", "reason": "Invalid token or not within booking time"}
 
-    def check_out(self, msg):
-        '''msg = {
-            "op": "CHECK_OUT",
-            "token": token
-        }'''
-        token = msg["token"]
-        if token == self.next_user_token:
-            self.current = self.STATUS[0]  # Set status to "Available"
-            self.next_user_token = None
-            self.update_leds()
-            self.bookings = {b for b in self.bookings.values if b["token"] != token}  # Remove booking
-            return {"op":"LOG", "action" : "check out","room_id":self.id, "type": "success"}
-        return {"op":"LOG", "action" : "check out", "room_id":self.id,  "type": "failure", "reason": "Invalid token or not checked in"}
-        
+                # Find and remove only the first (next) booking with this token
+                for key, b in list(self.bookings.items()):
+                    if b["token"] == token:
+                        del self.bookings[key]
+                        break  # remove only one booking
 
-    def handle_user(self, sc):
-        req = sc.recv(1024).decode()
-        req = json.loads(req)
-        msg_dic = {}
-        if req["op"] == "BOOK_ROOM":
-            msg_dic = self.book_room(req)
-        elif req["op"] == "CHECK_IN":
-            msg_dic = self.check_in(req)
-        elif req["op"] == "CHECK_OUT":
-            msg_dic = self.check_out(req)
-        msg = json.dumps(msg_dic)
-        resp = self.master_connect(msg)
-        if resp["type" ]== "success":
-            sc.sendall(json.dumps(resp).encode())
-          
+                return {"op": "LOG", "action": "check out", "room_id": self.id, "type": "success"}
+
+        # If we reach here, conditions failed
+        return {
+            "op": "LOG",
+            "action": "check out",
+            "room_id": self.id,
+            "type": "failure",
+            "reason": "Invalid token or not checked in"
+    }
+
+
+    def handle_user(self, sc: socket.socket):
+        """
+        Each connection is handled on its own thread.
+        This function tries to recv JSON once (with a timeout) and respond.
+        """
+        try:
+            sc.settimeout(5.0)
+            data = b""
+            try:
+                chunk = sc.recv(4096)
+                if chunk:
+                    data += chunk
+            except socket.timeout:
+                # no data in time -> close
+                sc.close()
+                return
+            if not data:
+                sc.close()
+                return
+            try:
+                req = json.loads(data.decode())
+            except Exception:
+                # Bad JSON
+                resp = {"op": "LOG", "action": "request", "type": "failure", "reason": "Invalid JSON"}
+                sc.sendall(json.dumps(resp).encode())
+                sc.close()
+                return
+
+            msg_dic = {}
+            op = req.get("op")
+            if op == "BOOK_ROOM":
+                msg_dic = self.book_room(req)
+            elif op == "CHECK_IN":
+                msg_dic = self.check_in(req)
+            elif op == "CHECK_OUT":
+                msg_dic = self.check_out(req)
+            else:
+                msg_dic = {"op": "LOG", "action": "request", "type": "failure", "reason": "Unknown op"}
+
+            # Send to master and wait for its confirmation
+            master_resp = self.master_connect(msg_dic)
+            # master_resp is a dict
+            if master_resp.get("type") == "success":
+                # forward master success back to client
+                try:
+                    sc.sendall(json.dumps(master_resp).encode())
+                except Exception:
+                    pass
+            else:
+                # master failed; still forward the reason (or the msg_dic result) so client knows
+                try:
+                    sc.sendall(json.dumps(master_resp).encode())
+                except Exception:
+                    pass
+        except Exception:
+            print("handle_user exception:", traceback.format_exc())
+        finally:
+            try:
+                sc.close()
+            except Exception:
+                pass
+
     def room_management(self):
-        '''Acts like a server that listens to user requests host = ip, port = 10000 + room_id'''
+        '''
+        Acts like a server that listens to user requests host = ip, port = 10000 + room_id
+        The accept loop is non-blocking (with timeout) so we can shutdown cleanly.
+        '''
         ip = self.get_local_ip()
         port = 10000 + self.id
 
@@ -163,15 +305,32 @@ class RoomPi:
         self.socket_users.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.socket_users.bind((ip, port))
         self.socket_users.listen(5)
+        # set timeout so accept() wakes periodically and checks self.running
+        self.socket_users.settimeout(1.0)
 
-        while self.running:
-            sc, client_addr = self.socket_users.accept()
-            client_thread = threading.Thread(target=self.handle_user, args=(sc,))
-            client_thread.daemon = True
-            client_thread.start()
- 
+        try:
+            while self.running:
+                try:
+                    sc, client_addr = self.socket_users.accept()
+                    client_thread = threading.Thread(target=self.handle_user, args=(sc,))
+                    client_thread.daemon = True
+                    client_thread.start()
+                except socket.timeout:
+                    # loop again to check running flag
+                    continue
+                except Exception:
+                    print("room_management accept exception:", traceback.format_exc())
+                    continue
+        finally:
+            try:
+                self.socket_users.close()
+            except Exception:
+                pass
 
-    def initailization(self, id):
+    def initialization(self, id):
+        """
+        Initialize the room and start threads. (note: renamed from initailization)
+        """
         self.id = int(id)
         print("Starting room pi service")
         ip = self.get_local_ip()
@@ -184,23 +343,52 @@ class RoomPi:
             "ip": ip,
             "port": port
         }
-        msg = json.dumps(msg_dict)
-        msg = json.loads(self.master_connect(msg))
-        if msg["type"] == "success":
-            self.bookings = msg["bookings"]
+        resp = self.master_connect(msg_dict)
+        # accept that master returns dict; it may include pre-existing bookings
+        if resp.get("type") == "success" and resp.get("bookings"):
+            # convert bookings into internal format (datetime objects)
+            with self.lock:
+                self.bookings = OrderedDict()
+                for b in resp["bookings"]:
+                    try:
+                        st = datetime.fromisoformat(b["starttime"])
+                        et = datetime.fromisoformat(b["endtime"])
+                        token = b.get("token")
+                        key = f"booking_{st.isoformat()}"
+                        self.bookings[key] = {"starttime": st, "endtime": et, "token": token}
+                    except Exception:
+                        # skip malformed booking entries
+                        pass
+                # sort to be safe
+                self.bookings = OrderedDict(sorted(self.bookings.items(), key=lambda kv: kv[1]['starttime']))
 
-        #HERE GOES THE MQTT THREAD
+        # start environment thread
+        self.environment_thread = threading.Thread(target=self.environment_readings)
+        self.environment_thread.daemon = True
+        self.environment_thread.start()
 
-        self.enevironment_thread = threading.Thread(target=self.environment_readings)
-        self.enevironment_thread.daemon = True
-        self.enevironment_thread.start()
+        # start room management (this will block until stopped)
+        try:
+            self.room_management()
+        except KeyboardInterrupt:
+            self.running = False
+        finally:
+            self.running = False
 
-        self.room_management()
-        
+    def stop(self):
+        """
+        Clean shutdown helper. Sets running False and closes listening socket.
+        """
+        self.running = False
+        try:
+            if self.socket_users:
+                self.socket_users.close()
+        except Exception:
+            pass
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: python3 room.py <room_id>")
         sys.exit(1)
     rp = RoomPi()
-    rp.initailization(sys.argv[1])
+    rp.initialization(sys.argv[1])
