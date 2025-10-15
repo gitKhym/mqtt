@@ -181,7 +181,7 @@ class RoomPi:
         with self.lock:
             # Check for overlap
             for b in self.bookings.values():
-                if not (endtime <= b["starttime"] or starttime >= b["endtime"]):
+                if not (starttime < b["starttime"] and endtime <= b["starttime"]) or not (starttime >= b["endtime"] and endtime > b["endtime"]):
                     return {"op": "LOG", "action": "booking", "room_id": self.id,
                             "type": "failure", "reason": "Time slot already booked"}
 
@@ -363,6 +363,7 @@ class RoomPi:
                 self.bookings = OrderedDict(sorted(self.bookings.items(), key=lambda kv: kv[1]['starttime']))
 
         # start environment thread
+        print(self.bookings)
         self.environment_thread = threading.Thread(target=self.environment_readings)
         self.environment_thread.daemon = True
         self.environment_thread.start()

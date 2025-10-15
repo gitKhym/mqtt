@@ -185,6 +185,10 @@ def booking():
     print(rooms)
     return render_template("book_room.html", rooms=rooms)
 
+    @app.route("/my-bookings")
+    def my_bookings():
+        pass;
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=7001, debug=True)
@@ -201,7 +205,7 @@ session rooms:
     "2": {
         "room_name": "Room_2",
         "ip": ip,
-        "port": port,
+        "port": port, 
         "status": status
     }
 '''
