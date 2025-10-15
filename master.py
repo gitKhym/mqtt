@@ -115,6 +115,7 @@ class Master:
             ).fetchone()
 
             if user_data:
+                print(self.active_rooms)
                 return {
                     "op":"LOG", "action" : "log in",
                     "type": "success", 
@@ -153,7 +154,8 @@ class Master:
             self.active_rooms[room_id] = {
                 "room_name": room_name,
                 "ip": room_ip,
-                "port": room_port
+                "port": room_port,
+                "status": request["status"]
             }
             return {"op":"LOG", "action" : "room connection", "type": "success", "bookings": bookings_list, "room id": room_id}
         except Exception as e:
@@ -226,6 +228,7 @@ class Master:
             pressure = request["pressure"]
             status = request["status"]
             timestamp = datetime.fromtimestamp(request["timestamp"])
+            self.active_rooms[room_id]["status"] = status
 
             # Update latest values in rooms table
             self.db.conn.execute(

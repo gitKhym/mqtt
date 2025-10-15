@@ -179,6 +179,7 @@ class RoomPi:
         msg_dict = {
             "op": "ACTIVATED_ROOM",
             "room_name": f"Room_{self.id}",
+            "status": self.current,
             "room_id": self.id,
             "ip": ip,
             "port": port

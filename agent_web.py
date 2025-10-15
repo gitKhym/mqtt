@@ -131,5 +131,56 @@ def logout():
     flash("You have been logged out.")
     return redirect(url_for("index"))
 
+@app.route("/book-a-room", methods=["GET", "POST"])
+def booking():
+    if "token" not in session:
+        return redirect(url_for("login"))
+
+    if request.method == "POST":
+        room_id = request.form["room_id"]
+        date = request.form["date"]
+        start_time = request.form["start_time"]
+        end_time = request.form["end_time"]
+
+        msg_dict = {
+            "op": "BOOK_ROOM",
+            "User_ID": session["user_id"],
+            "Token": session["token"],
+            "Room_ID": room_id,
+            "Date": date,
+            "Start_Time": start_time,
+            "End_Time": end_time
+        }
+        msg = json.dumps(msg_dict)
+        response = json.loads(send_to_master(msg))
+
+        if response["type"] == "success":
+            flash("Room booked successfully!")
+            return redirect(url_for("my_bookings"))
+        else:
+            reason = response.get("reason", "Unknown error")
+            flash(f"Failed to book room: {reason}")
+            return redirect(url_for("booking"))
+
+    rooms = session.get("rooms", {})
+    return render_template("book_a_room.html", rooms=rooms)
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=7001, debug=True)
+
+'''
+session rooms:
+{
+    "1": {
+        "room_name": "Room_1",
+        "ip": ip,
+        "port": port,
+        "status": status
+    },
+    "2": {
+        "room_name": "Room_2",
+        "ip": ip,
+        "port": port,
+        "status": status
+    }
+'''
