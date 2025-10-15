@@ -1,3 +1,5 @@
+
+from datetime import timedelta
 from datetime import datetime
 import sys
 import os
@@ -52,6 +54,28 @@ class Master:
             with self.rooms_lock:
                 active_rooms_copy = dict(self.active_rooms)
             print(active_rooms_copy)
+            today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            tomorrow = today + timedelta(days=1)
+            now = datetime.now()
+            for room in active_rooms_copy.values():
+                with self.db_lock:
+                    room_bookings = self.db.conn.execute(
+                        """
+                        SELECT start_time, end_time 
+                        FROM bookings 
+                        WHERE room_id=? AND start_time>=? AND start_time<? AND end_time>=?
+                        ORDER BY start_time ASC
+                        """,
+                        (room["id"], today, tomorrow, now)
+                    ).fetchall()
+
+                room["bookings"] = [
+                    {
+                        "start_time": booking["start_time"],
+                        "end_time": booking["end_time"],
+                    }
+                    for booking in room_bookings
+                ]
             return {
                 "op": "LOG", "action": "register", "type": "success",
                 "message": "Registration successful",
@@ -84,6 +108,28 @@ class Master:
                 with self.rooms_lock:
                     active_rooms_copy = dict(self.active_rooms)
                 print(active_rooms_copy)
+                today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+                tomorrow = today + timedelta(days=1)
+                now = datetime.now()
+                for room in active_rooms_copy.values():
+                    with self.db_lock:
+                        room_bookings = self.db.conn.execute(
+                            """
+                            SELECT start_time, end_time 
+                            FROM bookings 
+                            WHERE room_id=? AND start_time>=? AND start_time<? AND end_time>=?
+                            ORDER BY start_time ASC
+                            """,
+                            (room["id"], today, tomorrow, now)
+                        ).fetchall()
+
+                    room["bookings"] = [
+                        {
+                            "start_time": booking["start_time"],
+                            "end_time": booking["end_time"],
+                        }
+                        for booking in room_bookings
+                    ]
                 return {
                     "op": "LOG", "action": "log in", "type": "success",
                     "full_name": user_data["full_name"],
@@ -194,7 +240,7 @@ class Master:
             ).fetchall()
         bookings_list = []
         for booking in bookings_data:
-            if booking["status"] is 'booked' or booking["status"] is 'checked in':
+            if booking["status"] == 'booked' or booking["status"] == 'checked in':
                 bookings_list.append({
                     "booking_id": booking["id"],
                     "room_id": booking["room_id"],

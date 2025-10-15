@@ -46,6 +46,7 @@
                 <h5>{{ room.room_name }}</h5>
                 <span class="status {{ room.status }}">{{ room.status }}</span>
             </div>
+            
 
             <form class="booking-form" method="POST" action="{{ url_for('booking') }}">
                 <input type="hidden" name="room_id" value="{{ room_id }}">
