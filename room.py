@@ -228,7 +228,7 @@ class RoomPi:
                 starttime = datetime.fromisoformat(b["starttime"].isoformat())
                 endtime = datetime.fromisoformat(b["endtime"].isoformat())
                 print(starttime, endtime, token, b["token"])
-                if b["token"] == token and starttime <= now < endtime:
+                if b["token"] == token and starttime <= now and endtime > now:
                     self.current = self.STATUS[1]  # In Use
                     self.next_user_token = token
                     self.update_leds()
