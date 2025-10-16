@@ -199,7 +199,7 @@ class RoomPi:
             return {"op": "LOG", "action": "booking", "room_id": self.id,
                     "type": "failure", "reason": f"bad payload: {e}"}
 
-        now = datetime.now()
+        now = datetime.now(ZoneInfo("Australia/Melbourne")).replace(tzinfo=None)
         if starttime < now:
             return {"op": "LOG", "action": "booking", "room_id": self.id,
                     "type": "failure", "reason": "Cannot book for past time"}
@@ -221,7 +221,7 @@ class RoomPi:
 
     def check_in(self, msg: dict):
         token = msg.get("token")
-        now = datetime.now(ZoneInfo("Australia/Melbourne"))
+        now = datetime.now(ZoneInfo("Australia/Melbourne")).replace(tzinfo=None)
         print("Check in attempt:", token, now)
         with self.lock:
             for b in self.bookings:

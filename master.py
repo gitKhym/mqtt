@@ -39,9 +39,9 @@ class Master:
     def get_room_inf(self):
         with self.rooms_lock:
             active_rooms_copy = dict(self.active_rooms)
-        today = datetime.now(ZoneInfo("Australia/Melbourne")).replace(hour=0, minute=0, second=0, microsecond=0)
+        today = datetime.now(ZoneInfo("Australia/Melbourne")).replace(tzinfo=None).replace(hour=0, minute=0, second=0, microsecond=0)
         tomorrow = today + timedelta(days=1)
-        now = datetime.now(ZoneInfo("Australia/Melbourne"))
+        now = datetime.now(ZoneInfo("Australia/Melbourne")).replace(tzinfo=None)
         for room in active_rooms_copy.values():
             with self.db_lock:
                 room_id_getter = self.db.conn.execute(
@@ -220,7 +220,7 @@ class Master:
         print("[DEBUG] Entering get_bookings with token:", token)
         try:
             with self.db_lock:
-                now = datetime.now(ZoneInfo("Australia/Melbourne"))
+                now = datetime.now(ZoneInfo("Australia/Melbourne")).replace(tzinfo=None)
                 print("[DEBUG] Executing SQL query...")
                 bookings_data = self.db.conn.execute(
                     "SELECT * FROM bookings WHERE token=? AND end_time > ? ORDER BY start_time ASC",
