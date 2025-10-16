@@ -356,8 +356,8 @@ class RoomPi:
                     token = b["token"]
                     booking_entry = {"starttime": starttime, "endtime": endtime, "token": token}
                     list_of_bookings.append(booking_entry)
-                except Exception:
-                    # skip bad entries
+                except Exception as e:
+                    print(f"Skipping invalid booking from master: {b} due to {e}")
                     continue
             print(list_of_bookings)
         # start environment thread
