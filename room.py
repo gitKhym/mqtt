@@ -232,7 +232,7 @@ class RoomPi:
                     self.current = self.STATUS[1]  # In Use
                     self.next_user_token = token
                     self.update_leds()
-                    return {"op": "LOG", "action": "check in", "room_id": self.id, "type": "success"}
+                    return {"op": "LOG", "action": "check in", "room_id": self.id, "type": "success", "booking_id": msg.get("booking_id"), "token": token}
         return {"op": "LOG", "action": "check in", "room_id": self.id,
                 "type": "failure", "reason": "Invalid token or not within booking time"}
 
@@ -251,7 +251,7 @@ class RoomPi:
                         self.bookings.remove(b)
                         break  # remove only one booking
 
-                return {"op": "LOG", "action": "check out", "room_id": self.id, "type": "success"}
+                return {"op": "LOG", "action": "check out", "room_id": self.id, "type": "success", "booking_id": msg.get("booking_id"), "token": token}
 
         # If we reach here, conditions failed
         return {
