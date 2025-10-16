@@ -274,6 +274,7 @@ class RoomPi:
 
             # Send to master and wait for its confirmation
             master_resp = self.master_connect(msg_dic)
+            print(master_resp)
             # master_resp is a dict
             if master_resp.get("type") == "success":
                 # forward master success back to client
