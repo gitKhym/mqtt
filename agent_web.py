@@ -174,29 +174,83 @@ def booking():
         print(msg)
         response = json.loads(send_to_room(room_ip,room_port,msg))
 
-        if response["type"] == "success":
-            flash(f"Room booked successfully from {starttime} for {duration_hours} hours.")
-        else:
-            flash(f"Booking failed: {response.get('reason', 'Unknown error')}")
-
         return redirect(url_for("home"))
+     
 
     rooms = session.get("rooms", {})
     print(rooms)
     return render_template("book_room.html", rooms=rooms)
 
-    @app.route("/my-bookings")
-    def my_bookings():
-        if "token" not in session:
-            return redirect(url_for("login"))
-        # Fetch bookings from Master Pi
+@app.route("/my-bookings", methods=["GET"])
+def my_bookings():
+    if "token" not in session:
+        return redirect(url_for("login"))
+    # Fetch bookings from Master Pi
+    msg = {
+        "op": "GET_BOOKINGS",
+        "token": session["token"]
+    }
+    response = json.loads(send_to_master(json.dumps(msg)))
+    print(response)
+    
+    if response["type"] == "success":
+        bookings = response["bookings"]
+        return render_template("my_bookings.html", bookings=bookings)
+    else:
+        flash("Failed to retrieve bookings.")
+        return redirect(url_for("home"))
+
+@app.route("/my-bookings", methods=["POST"])
+def handle_bookiings():
+    if "token" not in session:
+        return redirect(url_for("login"))
+    booking_id = request.form.get("booking_id")
+    room_id = request.form.get("room_id")
+    full_date = request.form.get("full_date")
+    room_ip = session["rooms"][f"{room_id}"]["ip"]
+    room_port = session["rooms"][f"{room_id}"]["port"]
+    action = request.form.get("action")
+    if action == "cancel":
         msg = {
-            "op": "GET_BOOKINGS",
+            "op": "CANCEL_BOOKING",
+            "booking_id": booking_id,
+            "starttime": full_date,
             "token": session["token"]
         }
-        response = json.loads(send_to_master(json.dumps(msg)))
+        
+        response = json.loads(send_to_room(room_ip,room_port,json.dumps(msg)))
         if response["type"] == "success":
-            bookings = response["bookings"]
+            flash("Booking cancelled successfully.")
+        else:
+            flash("Failed to cancel booking.")
+
+    elif action == "checkin":
+        msg = {
+            "op": "CHECK_IN",
+            "booking_id": booking_id,
+            "starttime": full_date,
+            "token": session["token"]
+        }
+        
+        response = json.loads(send_to_room(room_ip,room_port,json.dumps(msg)))
+        if response["type"] == "success":
+            flash("Checked in successfully.")
+        else:
+            flash("Failed to check in.")
+    elif action == "checkout":
+        msg = {
+            "op": "CHECK_OUT",
+            "booking_id": booking_id,
+            "starttime": full_date,
+            "token": session["token"]
+        }
+        response = json.loads(send_to_room(room_ip,room_port,json.dumps(msg)))
+        if response["type"] == "success":
+            flash("Checked out successfully.")
+        else:
+            flash("Failed to check out.")
+
+    return redirect(url_for("my_bookings"))
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=7001, debug=True)

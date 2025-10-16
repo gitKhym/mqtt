@@ -34,6 +34,40 @@ class Master:
     # -------------------------
     # User Registration
     # -------------------------
+
+    def get_room_inf(self):
+        with self.rooms_lock:
+            active_rooms_copy = dict(self.active_rooms)
+        today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        tomorrow = today + timedelta(days=1)
+        now = datetime.now()
+        for room in active_rooms_copy.values():
+            with self.db_lock:
+                room_id_getter = self.db.conn.execute(
+                    "SELECT id FROM rooms WHERE room_name=?",
+                    (room["room_name"],)
+                ).fetchone()["id"]
+                
+                room_bookings = self.db.conn.execute(
+                    """
+                    SELECT start_time, end_time 
+                    FROM bookings 
+                    WHERE room_id=? AND start_time>=? AND start_time<? AND end_time>=?
+                    ORDER BY start_time ASC
+                    """,
+                    (room_id_getter, today, tomorrow, now)
+                ).fetchall()
+
+            room["bookings"] = [
+                {
+                    "start_time": datetime.fromisoformat(booking["start_time"]).strftime("%H:%M"),
+                    "end_time": datetime.fromisoformat(booking["end_time"]).strftime("%H:%M"),
+                }
+                for booking in room_bookings
+            ]
+
+        return active_rooms_copy
+        
     def register_user(self, request: dict):
         full_name = request["Full_Name"]
         password = request["Password"]
@@ -42,40 +76,13 @@ class Master:
         unique_id = request["Unique_ID"]
         token = str(binascii.hexlify(os.urandom(20)).decode())
         role = "user"
-
-        print(f"Registering user: {email}, {full_name}, {unique_id}")
         user = User(email=email, password=pw_hash, full_name=full_name,
                     user_id=unique_id, user_token=token, role=role)
 
         try:
             with self.db_lock:
                 userId = self.db.create_user(user)
-            print(f"User {email} registered with ID {userId}")
-            with self.rooms_lock:
-                active_rooms_copy = dict(self.active_rooms)
-            print(active_rooms_copy)
-            today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-            tomorrow = today + timedelta(days=1)
-            now = datetime.now()
-            for room in active_rooms_copy.values():
-                with self.db_lock:
-                    room_bookings = self.db.conn.execute(
-                        """
-                        SELECT start_time, end_time 
-                        FROM bookings 
-                        WHERE room_id=? AND start_time>=? AND start_time<? AND end_time>=?
-                        ORDER BY start_time ASC
-                        """,
-                        (room["id"], today, tomorrow, now)
-                    ).fetchall()
-
-                room["bookings"] = [
-                    {
-                        "start_time": booking["start_time"],
-                        "end_time": booking["end_time"],
-                    }
-                    for booking in room_bookings
-                ]
+            active_rooms_copy = self.get_room_inf()
             return {
                 "op": "LOG", "action": "register", "type": "success",
                 "message": "Registration successful",
@@ -105,31 +112,7 @@ class Master:
                 ).fetchone()
 
             if user_data:
-                with self.rooms_lock:
-                    active_rooms_copy = dict(self.active_rooms)
-                print(active_rooms_copy)
-                today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-                tomorrow = today + timedelta(days=1)
-                now = datetime.now()
-                for room in active_rooms_copy.values():
-                    with self.db_lock:
-                        room_bookings = self.db.conn.execute(
-                            """
-                            SELECT start_time, end_time 
-                            FROM bookings 
-                            WHERE room_id=? AND start_time>=? AND start_time<? AND end_time>=?
-                            ORDER BY start_time ASC
-                            """,
-                            (room["id"], today, tomorrow, now)
-                        ).fetchall()
-
-                    room["bookings"] = [
-                        {
-                            "start_time": booking["start_time"],
-                            "end_time": booking["end_time"],
-                        }
-                        for booking in room_bookings
-                    ]
+                active_rooms_copy = self.get_room_inf()
                 return {
                     "op": "LOG", "action": "log in", "type": "success",
                     "full_name": user_data["full_name"],
@@ -167,8 +150,7 @@ class Master:
                 ).fetchone()
 
                 if not room_data:
-                    new_room = Room(id=room_id, room_name=room_name,
-                                    location="", capacity=0, status="Available")
+                    new_room = Room(room_name,"", 0, status="Available")
                     self.db.create_room(new_room)
                 else:
                     room_bookings = self.db.conn.execute(
@@ -184,6 +166,7 @@ class Master:
 
             with self.rooms_lock:
                 self.active_rooms[room_id] = {
+                    "id": room_id,
                     "room_name": room_name,
                     "ip": room_ip,
                     "port": room_port,
@@ -233,22 +216,44 @@ class Master:
             }
 
     def get_bookings(self, token: str):
-        with self.db_lock:
-            bookings_data = self.db.conn.execute(
-                "SELECT * FROM bookings WHERE token=?",
-                (token,)
-            ).fetchall()
-        bookings_list = []
-        for booking in bookings_data:
-            if booking["status"] == 'booked' or booking["status"] == 'checked in':
-                bookings_list.append({
-                    "booking_id": booking["id"],
-                    "room_id": booking["room_id"],
-                    "start_time": booking["start_time"],
-                    "end_time": booking["end_time"],
-                    "status": booking["status"]
-                })
-        return {"op": "LOG", "action": "fetch_bookings", "type": "success", "bookings": bookings_list}
+        print("[DEBUG] Entering get_bookings with token:", token)
+        try:
+            with self.db_lock:
+                now = datetime.now()
+                print("[DEBUG] Executing SQL query...")
+                bookings_data = self.db.conn.execute(
+                    "SELECT * FROM bookings WHERE token=? AND end_time > ? ORDER BY start_time ASC",
+                    (token, now)
+                ).fetchall()
+                print("[DEBUG] Query executed. Rows fetched:", len(bookings_data))
+
+            bookings_list = []
+            for booking in bookings_data:
+                print("[DEBUG] Processing booking:", dict(booking))
+                if booking["status"] in ('Booked', 'checked in'):
+                    bookings_list.append({
+                        "booking_id": booking["id"],
+                        "room_id": booking["room_id"],
+                        "date": datetime.fromisoformat(booking["start_time"]).strftime("%Y-%m-%d"),
+                        "start_time": datetime.fromisoformat(booking["start_time"]).strftime("%H:%M"),
+                        "end_time": datetime.fromisoformat(booking["end_time"]).strftime("%H:%M"),
+                        "full_start_time": datetime.fromisoformat(booking["start_time"]).strftime("%Y-%m-%dT%H:%M"),
+                        "status": booking["status"]
+                    })
+
+            response = {
+                "op": "LOG",
+                "action": "fetch_bookings",
+                "type": "success",
+                "bookings": bookings_list
+            }
+            print("[DEBUG] Returning response:", response)
+            return response
+
+        except Exception as e:
+            print("[ERROR] get_bookings failed:", e)
+            raise
+
 
     def check_in(self, request: dict):
         with self.db_lock:
@@ -377,15 +382,18 @@ class Master:
                     "op": "LOG", "action": "sensor_update",
                     "type": "success", "room_id": room_id
                 }
+            elif request["op"] == "GET_BOOKINGS":
+                response = self.get_bookings(request["token"])
             else:
                 response = {
                     "op": request.get("op"),
                     "type": "failure",
                     "reason": "Unknown operation"
                 }
-
             self.log_create(response)
+            print(response)
             conn.sendall(json.dumps(response).encode())
+            conn.close()
 
         except Exception as e:
             error_response = {"op": "LOG", "type": "failure", "reason": str(e)}

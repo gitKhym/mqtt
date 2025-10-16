@@ -41,12 +41,15 @@
 
     {% if rooms %}
         {% for room_id, room in rooms.items() %}
-        <div class="room-card">
-            <div class="room-header">
-                <h5>{{ room.room_name }}</h5>
-                <span class="status {{ room.status }}">{{ room.status }}</span>
-            </div>
-            
+            <h3>{{ room.room_name }} ({{ room.status }})</h3>
+            <h6>Today's bookings</h6>
+            {% if room.bookings %}
+                {% for booking in room.bookings %}
+                    <p>{{ booking.start_time }} – {{ booking.end_time }}</p>
+                {% endfor %}
+            {% else %}
+                <p>No bookings today</p>
+            {% endif %}
 
             <form class="booking-form" method="POST" action="{{ url_for('booking') }}">
                 <input type="hidden" name="room_id" value="{{ room_id }}">

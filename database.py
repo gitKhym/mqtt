@@ -88,6 +88,7 @@ class Database:
                                         start_time datetime NOT NULL,
                                         end_time datetime NOT NULL,
                                         token text NOT NULL,
+                                        status text DEFAULT 'Booked',
                                         FOREIGN KEY (user_id) REFERENCES users (id),
                                         FOREIGN KEY (room_id) REFERENCES rooms (id)
                                     );"""
