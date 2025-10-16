@@ -271,7 +271,7 @@ class Master:
                 }
             else:
                 self.db.conn.execute(
-                            "UPDATE booking SET status = ? WHERE id=?",
+                            "UPDATE bookings SET status = ? WHERE id=?",
                             ("checked in", booking_id)
                         )
                 self.db.conn.commit()
@@ -293,7 +293,7 @@ class Master:
                 }
             else:
                 self.db.conn.execute(
-                            "UPDATE booking SET status = ? WHERE id=?",
+                            "UPDATE bookings SET status = ? WHERE id=?",
                             ("checked out", booking_id)
                         )
                 self.db.conn.commit()
@@ -357,9 +357,6 @@ class Master:
                 elif log["type"] == "failure":
                     self.db.create_log(None, log["action"], log["reason"])
 
-    # -------------------------
-    # Handle Client Connections
-    # -------------------------
     def _handle_client(self, conn: socket.socket, addr: Tuple[str, int]) -> None:
         try:
             request_dict = conn.recv(1024).decode()
@@ -423,7 +420,6 @@ class Master:
                 }
             self.log_create(response)
             conn.sendall(json.dumps(response).encode())
-            conn.close()
 
         except Exception as e:
             error_response = {"op": "LOG", "type": "failure", "reason": str(e)}
