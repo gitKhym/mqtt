@@ -21,7 +21,6 @@ class RoomPi:
         self.socket_users = None
         self.sense = SenseHat()
         self.running = True
-        # bookings is an OrderedDict keyed by ISO starttime string -> {starttime: datetime, endtime: datetime, token: str}
         self.bookings = []
         # Lock to protect access to bookings/current/next_user_token
         self.lock = threading.RLock()
@@ -153,6 +152,33 @@ class RoomPi:
                 time.sleep(0.5)
                 slept += 0.5
 
+    def cancel_booking(self, msg: dict):
+        """
+        msg expects:
+        {
+            "op":"CANCEL_BOOKING",
+            "starttime":"2025-10-15T19:00:00",
+            "booking_id":id,
+            "token":"abc"
+        }
+        """
+        try:
+            booking_id = msg["booking_id"]
+            token = msg["token"]
+            print(booking_id, token)
+        except Exception as e:
+            return {"op": "LOG", "action": "cancel booking", "room_id": self.id,
+                    "type": "failure", "reason": f"bad payload: {e}"}
+
+        with self.lock:
+            for b in self.bookings:
+                if b['starttime'].isoformat() == booking_id and b["token"] == token:
+                    self.bookings.remove(b)
+                    return {"op": "LOG", "action": "cancel booking", "room_id": self.id, "type": "success",, "booking_id": booking_id}
+
+        return {"op": "LOG", "action": "cancel booking", "room_id": self.id,
+                "type": "failure", "reason": "Booking not found or invalid token"}
+
     def book_room(self, msg: dict):
         """
         msg expects:
@@ -265,6 +291,9 @@ class RoomPi:
             op = req.get("op")
             if op == "BOOK_ROOM":
                 msg_dic = self.book_room(req)
+
+            elif op == "CANCEL_BOOKING":
+                msg_dic = self.cancel_booking(req)
             elif op == "CHECK_IN":
                 msg_dic = self.check_in(req)
             elif op == "CHECK_OUT":
