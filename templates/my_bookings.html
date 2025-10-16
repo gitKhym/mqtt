@@ -46,17 +46,19 @@
                         </div>
                     </div>
                     <div class="col-md-4 text-end">
-                        <form method="POST" action="">
+                        <form method="POST" action="{{ url_for('handle_bookings') }}">
                             <input type="hidden" name="room_id" value="{{ b.room_id }}">
                             <input type="hidden" name="booking_id" value="{{ b.booking_id }}">
                             <input type="hidden" name="full_date" value="{{ b.full_start_time}}">
+                            <input type="hidden" name="end_time" value="{{ b.full_end_time }}">
                            
                             {% if b.status == 'Booked' %}
                                 <button name="action" value="check_in" class="btn btn-success btn-sm">Check In</button>
+                                <button name="action" value="cancel" class="btn btn-danger btn-sm">Cancel</button>
                             {% elif b.status == 'checked in' %}
                                 <button name="action" value="check_out" class="btn btn-primary btn-sm">Check Out</button>
                             {% endif %}
-                            <button name="action" value="cancel" class="btn btn-danger btn-sm">Cancel</button>
+                            
                         </form>
                     </div>
                 </div>

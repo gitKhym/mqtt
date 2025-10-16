@@ -223,7 +223,9 @@ class RoomPi:
         now = datetime.now()
         with self.lock:
             for b in self.bookings:
-                if b["token"] == token and b["starttime"] <= now < b["endtime"]:
+                starttime = datetime.fromisoformat(b["starttime"].isoformat())
+                endtime = datetime.fromisoformat(b["endtime"].isoformat())
+                if b["token"] == token and starttime <= now < endtime:
                     self.current = self.STATUS[1]  # In Use
                     self.next_user_token = token
                     self.update_leds()
@@ -241,9 +243,9 @@ class RoomPi:
                 self.update_leds()
 
                 # Find and remove only the first (next) booking with this token
-                for key, b in self.bookings:
+                for b in self.bookings:
                     if b["token"] == token:
-                        del self.bookings[key]
+                        self.bookings.remove(b)
                         break  # remove only one booking
 
                 return {"op": "LOG", "action": "check out", "room_id": self.id, "type": "success"}

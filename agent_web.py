@@ -191,7 +191,6 @@ def my_bookings():
         "token": session["token"]
     }
     response = json.loads(send_to_master(json.dumps(msg)))
-    print(response)
     
     if response["type"] == "success":
         bookings = response["bookings"]
@@ -201,15 +200,18 @@ def my_bookings():
         return redirect(url_for("home"))
 
 @app.route("/my-bookings", methods=["POST"])
-def handle_bookiings():
+def handle_bookings():
     if "token" not in session:
         return redirect(url_for("login"))
     booking_id = request.form.get("booking_id")
     room_id = request.form.get("room_id")
     full_date = request.form.get("full_date")
+    end_time = request.form.get("end_time")
+    full_date = datetime.strptime(full_date, "%Y-%m-%dT%H:%M").isoformat()
     room_ip = session["rooms"][f"{room_id}"]["ip"]
     room_port = session["rooms"][f"{room_id}"]["port"]
     action = request.form.get("action")
+    print(full_date)
     if action == "cancel":
         msg = {
             "op": "CANCEL_BOOKING",
@@ -217,8 +219,9 @@ def handle_bookiings():
             "starttime": full_date,
             "token": session["token"]
         }
-        
-        response = json.loads(send_to_room(room_ip,room_port,json.dumps(msg)))
+        msg = json.dumps(msg)
+        print(msg)
+        response = json.loads(send_to_room(room_ip,room_port,msg))
         if response["type"] == "success":
             flash("Booking cancelled successfully.")
         else:
@@ -229,6 +232,7 @@ def handle_bookiings():
             "op": "CHECK_IN",
             "booking_id": booking_id,
             "starttime": full_date,
+            "endtime": end_time,
             "token": session["token"]
         }
         

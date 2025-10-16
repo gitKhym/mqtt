@@ -238,6 +238,7 @@ class Master:
                         "start_time": datetime.fromisoformat(booking["start_time"]).strftime("%H:%M"),
                         "end_time": datetime.fromisoformat(booking["end_time"]).strftime("%H:%M"),
                         "full_start_time": datetime.fromisoformat(booking["start_time"]).strftime("%Y-%m-%dT%H:%M"),
+                        "full_end_time": datetime.fromisoformat(booking["end_time"]).strftime("%Y-%m-%dT%H:%M"),
                         "status": booking["status"]
                     })
 
@@ -259,7 +260,7 @@ class Master:
         with self.db_lock:
             booking_id = request["booking_id"]
             booking = self.db.conn.execute(
-                "SELECT * FROM bookings WHERE id=? and status='booked'",
+                "SELECT * FROM bookings WHERE id=? and status='Booked'",
                 (booking_id,)
             ).fetchone()
             if not booking:
@@ -298,6 +299,32 @@ class Master:
                 return {
                     "op": "LOG", "action": "check out", "type": "success",
                     "message": "Check-out successful", "booking_id": booking_id
+                }
+
+    def cancel_booking(self, request: dict):
+        print("Entering cancel_booking with request:", request)
+        booking_id = request["booking_id"]
+        token = request["token"]
+        print(booking_id, token)
+        with self.db_lock:
+            booking = self.db.conn.execute(
+                "SELECT * FROM bookings WHERE id=? and token=? and status='Booked'",
+                (booking_id, token)
+            ).fetchone()
+            if not booking:
+                return {
+                    "op": "LOG", "action": "cancel booking", "type": "failure",
+                    "reason": "Cancellation failed: Invalid booking ID, token, or booking already checked in/out"
+                }
+            else:
+                self.db.conn.execute(
+                            "DELETE FROM bookings WHERE id=?",
+                            (booking_id, )
+                        )
+                self.db.conn.commit()
+                return {
+                    "op": "LOG", "action": "cancel booking", "type": "success",
+                    "message": "Booking cancelled successfully", "booking_id": booking_id
                 }
 
     # -------------------------
@@ -345,12 +372,15 @@ class Master:
             elif request["op"] == "ACTIVATED_ROOM":
                 response = self.activated_room(request)
             elif request["op"] == "LOG":
+                print(request["action"])
                 if request["type"] == "success" and request["action"] == "booking":
                     response = self.book_room(request)
                 elif request["type"] == "success" and request["action"] == "check in":
                     response  = self.check_in(request)
                 elif request["type"] == "success" and request["action"] == "check out":
                     response = self.check_out(request)
+                elif request["type"] == "success" and request["action"] == "cancel booking":
+                    response = self.cancel_booking(request)
                 else:
                     response = request
             elif request["op"] == "SENSOR_DATA":
@@ -391,7 +421,6 @@ class Master:
                     "reason": "Unknown operation"
                 }
             self.log_create(response)
-            print(response)
             conn.sendall(json.dumps(response).encode())
             conn.close()
 
