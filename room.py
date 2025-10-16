@@ -169,6 +169,7 @@ class RoomPi:
             duration_sec = int(msg["duration"])
             endtime = starttime + timedelta(seconds=duration_sec)
             token = msg["token"]
+            print(starttime, endtime)
         except Exception as e:
             return {"op": "LOG", "action": "booking", "room_id": self.id,
                     "type": "failure", "reason": f"bad payload: {e}"}
@@ -180,6 +181,7 @@ class RoomPi:
 
         with self.lock:
             # Check for overlap
+            
             for b in self.bookings.values():
                 if not (starttime < b["starttime"] and endtime <= b["starttime"]) or not (starttime >= b["endtime"] and endtime > b["endtime"]):
                     return {"op": "LOG", "action": "booking", "room_id": self.id,
