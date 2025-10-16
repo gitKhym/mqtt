@@ -171,7 +171,7 @@ class RoomPi:
             for b in self.bookings:
                 if b['starttime'] == starttime_dt and b["token"] == token:
                     self.bookings.remove(b)
-                    return {"op": "LOG", "action": "cancel booking", "room_id": self.id,
+                    return {"op": "LOG", "action": "cancel booking", "room_id": self.id, "token": token,
                             "type": "success", "booking_id": booking_id}
 
         return {"op": "LOG", "action": "cancel booking", "room_id": self.id,
