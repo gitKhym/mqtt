@@ -276,7 +276,7 @@ class RoomPi:
             master_resp = self.master_connect(msg_dic)
             print(master_resp)
             # master_resp is a dict
-            if master_resp.get("type") == "success":
+            if master_resp['type'] == 'success':
                 # forward master success back to client
                 try:
                     sc.sendall(json.dumps(master_resp).encode())
