@@ -22,7 +22,7 @@ class RoomPi:
         self.sense = SenseHat()
         self.running = True
         # bookings is an OrderedDict keyed by ISO starttime string -> {starttime: datetime, endtime: datetime, token: str}
-        self.bookings = OrderedDict()
+        self.bookings = []
         # Lock to protect access to bookings/current/next_user_token
         self.lock = threading.RLock()
 
@@ -95,13 +95,11 @@ class RoomPi:
         Booking dict expected: {"starttime": datetime, "endtime": datetime, "token": str}
         """
         with self.lock:
-            # create a key based on ISO start time (stable ordering)
-            key = f"booking_{booking['starttime'].isoformat()}"
-            # Add then sort by starttime
-            self.bookings[key] = booking
-            # Rebuild ordered dict sorted by starttime
-            sorted_items = sorted(self.bookings.items(), key=lambda kv: kv[1]['starttime'])
-            self.bookings = OrderedDict(sorted_items)
+            for b in self.bookings:
+                if booking["starttime"] < b["starttime"]:
+                    self.bookings.insert(self.bookings.index(b), booking)
+                    return
+            
 
     def environment_readings(self):
         """
@@ -198,7 +196,7 @@ class RoomPi:
         token = msg.get("token")
         now = datetime.now()
         with self.lock:
-            for b in self.bookings.values():
+            for b in self.bookings:
                 if b["token"] == token and b["starttime"] <= now < b["endtime"]:
                     self.current = self.STATUS[1]  # In Use
                     self.next_user_token = token
@@ -217,7 +215,7 @@ class RoomPi:
                 self.update_leds()
 
                 # Find and remove only the first (next) booking with this token
-                for key, b in list(self.bookings.items()):
+                for key, b in self.bookings:
                     if b["token"] == token:
                         del self.bookings[key]
                         break  # remove only one booking
@@ -348,23 +346,19 @@ class RoomPi:
         }
         resp = self.master_connect(msg_dict)
         # accept that master returns dict; it may include pre-existing bookings
-        if resp.get("type") == "success" and resp.get("bookings"):
-            # convert bookings into internal format (datetime objects)
-            with self.lock:
-                self.bookings = OrderedDict()
-                for b in resp["bookings"]:
-                    try:
-                        st = datetime.fromisoformat(b["starttime"])
-                        et = datetime.fromisoformat(b["endtime"])
-                        token = b.get("token")
-                        key = f"booking_{st.isoformat()}"
-                        self.bookings[key] = {"starttime": st, "endtime": et, "token": token}
-                    except Exception:
-                        # skip malformed booking entries
-                        pass
-                # sort to be safe
-                self.bookings = OrderedDict(sorted(self.bookings.items(), key=lambda kv: kv[1]['starttime']))
-
+        if resp["type"] == "success":
+            bookings = resp["bookings"]
+            list_of_bookings = []
+            for b in bookings.values():
+                try:
+                    starttime = datetime.fromisoformat(b["starttime"])
+                    endtime = datetime.fromisoformat(b["endtime"])
+                    token = b["token"]
+                    booking_entry = {"starttime": starttime, "endtime": endtime, "token": token}
+                    list_of_bookings.append(booking_entry)
+                except Exception:
+                    # skip bad entries
+                    continue
         # start environment thread
         self.environment_thread = threading.Thread(target=self.environment_readings)
         self.environment_thread.daemon = True
