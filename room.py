@@ -351,8 +351,8 @@ class RoomPi:
             list_of_bookings = []
             for b in bookings.values():
                 try:
-                    starttime = datetime.fromisoformat(b["starttime"])
-                    endtime = datetime.fromisoformat(b["endtime"])
+                    starttime = datetime.fromisoformat(b["start_time"])
+                    endtime = datetime.fromisoformat(b["end_time"])
                     token = b["token"]
                     booking_entry = {"starttime": starttime, "endtime": endtime, "token": token}
                     list_of_bookings.append(booking_entry)
