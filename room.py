@@ -1,3 +1,4 @@
+from zoneinfo import ZoneInfo
 from datetime import datetime, timedelta
 import socket
 from sense_hat import SenseHat
@@ -220,7 +221,7 @@ class RoomPi:
 
     def check_in(self, msg: dict):
         token = msg.get("token")
-        now = datetime.now()
+        now = datetime.now(ZoneInfo("Australia/Melbourne"))
         print("Check in attempt:", token, now)
         with self.lock:
             for b in self.bookings:
