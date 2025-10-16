@@ -363,6 +363,7 @@ class RoomPi:
         # start environment thread
 
         self.bookings = list_of_bookings
+        print(self.bookings)
         self.environment_thread = threading.Thread(target=self.environment_readings)
         self.environment_thread.daemon = True
         self.environment_thread.start()
