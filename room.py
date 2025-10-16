@@ -221,10 +221,12 @@ class RoomPi:
     def check_in(self, msg: dict):
         token = msg.get("token")
         now = datetime.now()
+        print("Check in attempt:", token, now)
         with self.lock:
             for b in self.bookings:
                 starttime = datetime.fromisoformat(b["starttime"].isoformat())
                 endtime = datetime.fromisoformat(b["endtime"].isoformat())
+                print(starttime, endtime, token, b["token"])
                 if b["token"] == token and starttime <= now < endtime:
                     self.current = self.STATUS[1]  # In Use
                     self.next_user_token = token
