@@ -174,7 +174,7 @@ class RoomPi:
             for b in self.bookings:
                 if b['starttime'].isoformat() == booking_id and b["token"] == token:
                     self.bookings.remove(b)
-                    return {"op": "LOG", "action": "cancel booking", "room_id": self.id, "type": "success",, "booking_id": booking_id}
+                    return {"op": "LOG", "action": "cancel booking", "room_id": self.id, "type": "success", "booking_id": booking_id}
 
         return {"op": "LOG", "action": "cancel booking", "room_id": self.id,
                 "type": "failure", "reason": "Booking not found or invalid token"}
@@ -391,9 +391,9 @@ class RoomPi:
                     print(f"Skipping invalid booking from master: {b} due to {e}")
                     continue
             print(list_of_bookings)
+            self.bookings = list_of_bookings
         # start environment thread
 
-        self.bookings = list_of_bookings
         print(self.bookings)
         self.environment_thread = threading.Thread(target=self.environment_readings)
         self.environment_thread.daemon = True
