@@ -301,6 +301,7 @@ class RoomPi:
                 msg_dic = {"op": "LOG", "action": "request", "type": "failure", "reason": "Unknown op"}
 
             # Send to master and wait for its confirmation
+            print(msg_dic)
             master_resp = self.master_connect(msg_dic)
             print(master_resp)
             # master_resp is a dict
