@@ -1,4 +1,6 @@
 import sqlite3
+import time
+import datetime
 from models.user import User
 from models.room import Room
 from models.booking import Booking
@@ -22,10 +24,10 @@ class Database:
             self.conn.close()
 
     def create_user(self, user: User):
-        sql = '''INSERT INTO users(email,password,full_name,user_id,role)
-                  VALUES(?,?,?,?,?)'''
+        sql = '''INSERT INTO users(email,password,full_name,user_id,user_token,role)
+                  VALUES(?,?,?,?,?,?)'''
         cur = self.conn.cursor()
-        cur.execute(sql, (user.email, user.password, user.full_name, user.user_id, user.role))
+        cur.execute(sql, (user.email, user.password, user.full_name, user.user_id, user.user_token, user.role))
         self.conn.commit()
         return cur.lastrowid
 
@@ -53,9 +55,18 @@ class Database:
         self.conn.commit()
         return cur.lastrowid
 
+    def create_log(self, user_id, action, details):
+        sql = '''INSERT INTO logs(user_id,action,timestamp,details)
+                  VALUES(?,?,?,?)'''
+        cur = self.conn.cursor()
+        now = datetime.datetime.fromtimestamp(time.time())
+        cur.execute(sql, (user_id, action, now, details))
+        self.conn.commit()
+        return cur.lastrowid
+
     def create_all_tables(self):
         sql_create_users_table = """CREATE TABLE IF NOT EXISTS users (
-                                            id integer PRIMARY KEY,
+                                            id integer PRIMARY KEY autoincrement,
                                             email text NOT NULL UNIQUE,
                                             password text NOT NULL,
                                             full_name text NOT NULL,
@@ -65,24 +76,25 @@ class Database:
                                         );"""
 
         sql_create_rooms_table = """CREATE TABLE IF NOT EXISTS rooms (
-                                        id integer PRIMARY KEY,
+                                        id integer PRIMARY KEY autoincrement,
                                         room_name text NOT NULL UNIQUE,
                                         status text NOT NULL
                                     );"""
 
         sql_create_bookings_table = """CREATE TABLE IF NOT EXISTS bookings (
-                                        id integer PRIMARY KEY,
+                                        id integer PRIMARY KEY autoincrement,
                                         user_id integer NOT NULL,
                                         room_id integer NOT NULL,
                                         start_time datetime NOT NULL,
                                         end_time datetime NOT NULL,
-                                        token text NOT NULL UNIQUE,
+                                        token text NOT NULL,
+                                        status text DEFAULT 'Booked',
                                         FOREIGN KEY (user_id) REFERENCES users (id),
                                         FOREIGN KEY (room_id) REFERENCES rooms (id)
                                     );"""
 
         sql_create_sensor_data_table = """CREATE TABLE IF NOT EXISTS sensor_data (
-                                            id integer PRIMARY KEY,
+                                            id integer PRIMARY KEY  autoincrement,
                                             room_id integer NOT NULL,
                                             timestamp datetime NOT NULL,
                                             temperature real NOT NULL,
@@ -92,7 +104,7 @@ class Database:
                                         );"""
 
         sql_create_logs_table = """CREATE TABLE IF NOT EXISTS logs (
-                                        id integer PRIMARY KEY,
+                                        id integer PRIMARY KEY autoincrement,
                                         user_id integer,
                                         action text NOT NULL,
                                         timestamp datetime NOT NULL,

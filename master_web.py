@@ -5,16 +5,21 @@ from database import Database
 from models.user import User
 from models.room import Room
 
-from flask import Flask, render_template, request, redirect, url_for, session, flash
+from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify
 import os
 import matplotlib.pyplot as plt
 import io, base64
+from datetime import datetime
 
 app = Flask(__name__)
 app.secret_key = "supersecretkey"
 
 DB_FILE = os.path.join(os.path.dirname(__file__), "database.db")
 db = Database(DB_FILE)
+
+@app.template_filter('datetimeformat')
+def datetimeformat(value):
+    return datetime.fromtimestamp(int(value)).strftime('%Y-%m-%d %H:%M:%S')
 
 # ---------- LOGIN ----------
 @app.route("/", methods=["GET", "POST"])
@@ -75,7 +80,20 @@ def delete_user(user_id):
 @app.route("/rooms")
 def rooms():
     conn = db.conn
-    rooms = conn.execute("SELECT * FROM rooms").fetchall()
+    rooms = conn.execute("""
+        SELECT r.id, r.status,
+               sd.temperature, sd.humidity, sd.pressure, sd.timestamp
+        FROM rooms r
+        LEFT JOIN (
+            SELECT room_id, temperature, humidity, pressure, timestamp
+            FROM sensor_data
+            WHERE (room_id, timestamp) IN (
+                SELECT room_id, MAX(timestamp)
+                FROM sensor_data
+                GROUP BY room_id
+            )
+        ) sd ON r.id = sd.room_id
+    """).fetchall()
     return render_template("rooms.html", rooms=rooms)
 
 @app.route("/update_room_status", methods=["POST"])
@@ -125,6 +143,25 @@ def reports():
     plot_data = base64.b64encode(buf.getvalue()).decode()
     return render_template("reports.html", plot_data=plot_data)
 
+# ---------- SENSOR HISTORY ----------
+@app.route("/sensor_history/<int:room_id>")
+def sensor_history(room_id):
+    conn = db.conn
+    rows = conn.execute(
+        "SELECT timestamp, temperature, humidity, pressure FROM sensor_data WHERE room_id=? ORDER BY timestamp DESC LIMIT 20",
+        (room_id,)
+    ).fetchall()
+    history = [
+        {
+            "timestamp": row["timestamp"],
+            "temperature": row["temperature"],
+            "humidity": row["humidity"],
+            "pressure": row["pressure"]
+        }
+        for row in rows
+    ]
+    return jsonify(history)
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8001, debug=True)
- 
+
