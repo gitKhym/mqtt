@@ -285,7 +285,7 @@ class RoomPi:
                 sc.sendall(json.dumps(resp).encode())
                 sc.close()
                 return
-
+            print(req)
             msg_dic = {}
             op = req.get("op")
             if op == "BOOK_ROOM":
