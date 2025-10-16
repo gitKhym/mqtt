@@ -152,32 +152,31 @@ class RoomPi:
                 time.sleep(0.5)
                 slept += 0.5
 
+
     def cancel_booking(self, msg: dict):
-        """
-        msg expects:
-        {
-            "op":"CANCEL_BOOKING",
-            "starttime":"2025-10-15T19:00:00",
-            "booking_id":id,
-            "token":"abc"
-        }
-        """
         try:
             booking_id = msg["booking_id"]
+            starttime = msg["starttime"]
             token = msg["token"]
-            print(booking_id, token)
-        except Exception as e:
+            starttime_dt = datetime.fromisoformat(starttime)
+            print(booking_id, starttime_dt, token)
+        except KeyError as e:
             return {"op": "LOG", "action": "cancel booking", "room_id": self.id,
-                    "type": "failure", "reason": f"bad payload: {e}"}
+                    "type": "failure", "reason": f"Missing field: {e}"}
+        except ValueError as e:
+            return {"op": "LOG", "action": "cancel booking", "room_id": self.id,
+                    "type": "failure", "reason": f"Invalid starttime format: {e}"}
 
         with self.lock:
             for b in self.bookings:
-                if b['starttime'].isoformat() == booking_id and b["token"] == token:
+                if b['starttime'] == starttime_dt and b["token"] == token:
                     self.bookings.remove(b)
-                    return {"op": "LOG", "action": "cancel booking", "room_id": self.id, "type": "success", "booking_id": booking_id}
+                    return {"op": "LOG", "action": "cancel booking", "room_id": self.id,
+                            "type": "success", "booking_id": booking_id}
 
         return {"op": "LOG", "action": "cancel booking", "room_id": self.id,
                 "type": "failure", "reason": "Booking not found or invalid token"}
+
 
     def book_room(self, msg: dict):
         """
