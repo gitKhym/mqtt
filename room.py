@@ -181,6 +181,7 @@ class RoomPi:
             # Check for overlap
             
             for b in self.bookings:
+                print(b["starttime"], b["endtime"])
                 if not (starttime < b["starttime"] and endtime <= b["starttime"]) or not (starttime >= b["endtime"] and endtime > b["endtime"]):
                     return {"op": "LOG", "action": "booking", "room_id": self.id,
                             "type": "failure", "reason": "Time slot already booked"}
