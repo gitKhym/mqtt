@@ -227,7 +227,7 @@ def handle_bookings():
         else:
             flash("Failed to cancel booking.")
 
-    elif action == "checkin":
+    elif action == "check_in":
         msg = {
             "op": "CHECK_IN",
             "booking_id": booking_id,
@@ -241,7 +241,7 @@ def handle_bookings():
             flash("Checked in successfully.")
         else:
             flash("Failed to check in.")
-    elif action == "checkout":
+    elif action == "check_out":
         msg = {
             "op": "CHECK_OUT",
             "booking_id": booking_id,
