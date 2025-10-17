@@ -16,6 +16,7 @@ app = Flask(__name__)
 app.secret_key = "supersecretkey"
 rooms = {}
 
+
 def send_to_master(message):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.connect((SOCKET_HOST, SOCKET_PORT))
@@ -51,22 +52,19 @@ def register():
             flash("All fields are required.")
             return redirect(url_for("register"))
 
-        # Validate full name
         if not re.match(r"^[A-Za-zÀ-ÿ' -]{2,50}$", full_name):
-            flash("Full name must contain only letters and be 2–50 characters long.")
+            flash("Full name must contain only letters and be 2-50 characters long.")
             return redirect(url_for("register"))
 
-        # Validate email format
         if not re.match(r"^[\w\.-]+@[\w\.-]+\.\w{2,}$", email):
             flash("Invalid email format.")
             return redirect(url_for("register"))
 
-        # Validate password strength
-        if not re.match(r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#^])[A-Za-z\d@$!%*?&#^]{8,}$", password):
+        if not re.match(r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).{8,}$", password):
             flash("Password must be at least 8 characters long and include upper, lower, number, and special character.")
             return redirect(url_for("register"))
 
-        # Validate unique ID (starts with lowercase 's', 8 chars total, alphanumeric)
+
         if not re.match(r"^s[0-9]{7}$", unique_id):
             flash("Wrong RMIT id.")
             return redirect(url_for("register"))
@@ -76,7 +74,8 @@ def register():
             "Full_Name": full_name,
             "Email": email,
             "Password": password,
-            "Unique_ID": unique_id}
+            "Unique_ID": unique_id
+        }
         msg = json.dumps(msg_dict)
         response = json.loads(send_to_master(msg))
         if response["type"] == "success":
@@ -89,8 +88,7 @@ def register():
             flash("registration succesful")
             return redirect(url_for("home"))
         else:
-            rsp = response["reason"]
-            flash(f"Registration failed: {rsp}")
+            flash(f"Registration failed: {response['reason']}")
             return redirect(url_for("register"))
 
     return render_template("register.html")
@@ -101,59 +99,32 @@ def login():
         email = request.form["email"]
         password = request.form["password"]
 
-        # Send login request to Master Pi
-        msg_json = {
-            "op": "LOGIN",
-            "Email": email,
-            "Password": password
-        }
+        if not email or not password:
+            flash("Email and password are required")
+            return redirect(url_for("login"))
+
+        msg_json = {"op": "LOGIN", "Email": email, "Password": password}
         msg = json.dumps(msg_json)
         response = json.loads(send_to_master(msg))
 
-        
-
-        # Check Master Pi response
-        if response['type']=="success":
+        if response['type'] == "success":
             session["user_email"] = email
-            flash("Login successful!")
-
-          
+            flash("Login successful")
             user_role = response["role"]
-            user_id = response["user_id"]
-            full_name = response["full_name"]
-            token = response["user_token"]
-            
             session["user_role"] = user_role
-            session["user_id"] = user_id
+            session["user_id"] = response["user_id"]
             session["rooms"] = response["rooms"]
-            session["full_name"] = full_name
-            session["token"] = token
+            session["full_name"] = response["full_name"]
+            session["token"] = response["user_token"]
 
-            # Determine redirect based on role
-            if user_role == "security":
-                return redirect(url_for("security_home"))
-            elif user_role in ["user", "student", "teacher"]:
-                return redirect(url_for("home"))
-            else:
-                flash("Unknown role returned by Master Pi.")
-                return redirect(url_for("login"))
+
+            return redirect(url_for("home"))
 
         elif response["type"] == "failure":
-            reason = response["reason"]
-            flash(f"Login failed: {reason}")
-            return redirect(url_for("login"))
-
-        else:
-            flash("Unexpected response from Master Pi.")
+            flash(f"Login failed: {response['reason']}")
             return redirect(url_for("login"))
 
     return render_template("login.html")
-
-@app.route("/security_home")
-def security_home():
-    if "user_email" not in session or session.get("user_role") != "security":
-        return redirect(url_for("login"))
-    return render_template("security_home.html")
 
 @app.route("/home")
 def home():
@@ -167,7 +138,7 @@ def logout():
     session.pop("user_id", None)
     session.pop("user_role", None)
     flash("You have been logged out.")
-    return redirect(url_for("index"))
+    return redirect(url_for("index"))    
 
 
 
@@ -183,6 +154,7 @@ def booking():
 
         if duration_hours > 2:
             flash("You can only book a room for 2h max")
+            return redirect(url_for("booking"))
 
         # Convert and compute endtime
         starttime = datetime.fromisoformat(starttime_str)
