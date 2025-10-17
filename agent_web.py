@@ -1,4 +1,5 @@
 from agent import Agent
+import re
 import sys
 import os
 import json
@@ -46,6 +47,30 @@ def register():
         password = request.form["password"]
         unique_id = request.form["unique_id"]
 
+        if not all([full_name, email, password, unique_id]):
+            flash("All fields are required.")
+            return redirect(url_for("register"))
+
+        # Validate full name
+        if not re.match(r"^[A-Za-zÀ-ÿ' -]{2,50}$", full_name):
+            flash("Full name must contain only letters and be 2–50 characters long.")
+            return redirect(url_for("register"))
+
+        # Validate email format
+        if not re.match(r"^[\w\.-]+@[\w\.-]+\.\w{2,}$", email):
+            flash("Invalid email format.")
+            return redirect(url_for("register"))
+
+        # Validate password strength
+        if not re.match(r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#^])[A-Za-z\d@$!%*?&#^]{8,}$", password):
+            flash("Password must be at least 8 characters long and include upper, lower, number, and special character.")
+            return redirect(url_for("register"))
+
+        # Validate unique ID (starts with lowercase 's', 8 chars total, alphanumeric)
+        if not re.match(r"^s[0-9]{7}$", unique_id):
+            flash("Wrong RMIT id.")
+            return redirect(url_for("register"))
+
         msg_dict = {
             "op": "REGISTER",
             "Full_Name": full_name,
@@ -65,7 +90,7 @@ def register():
             return redirect(url_for("home"))
         else:
             rsp = response["reason"]
-            flash(rsp)
+            flash(f"Registration failed: {rsp}")
             return redirect(url_for("register"))
 
     return render_template("register.html")
@@ -156,6 +181,9 @@ def booking():
         starttime_str = request.form["starttime"]
         duration_hours = int(request.form["duration"])
 
+        if duration_hours > 2:
+            flash("You can only book a room for 2h max")
+
         # Convert and compute endtime
         starttime = datetime.fromisoformat(starttime_str)
 
@@ -173,13 +201,19 @@ def booking():
         msg = json.dumps(booking_request)
         print(msg)
         response = json.loads(send_to_room(room_ip,room_port,msg))
+        if response["type"] == "success":
+            flash("Room booked successfully.")
+        else:
+            flash("Failed to book the room." + response["reason"])
 
         return redirect(url_for("home"))
      
-
+    msg = {"op": "UPDATE_ROOMS"}  
+    response = json.loads(send_to_master(json.dumps(msg)))
+     
+    session['rooms'] = response['rooms']
     rooms = session.get("rooms", {})
-    print(rooms)
-    return render_template("book_room.html", rooms=rooms)
+    return render_template("book_room.html", rooms=rooms)  
 
 @app.route("/my-bookings", methods=["GET"])
 def my_bookings():
@@ -254,7 +288,7 @@ def handle_bookings():
         else:
             flash("Failed to check out.")
 
-    return redirect(url_for("my_bookings"))
+    return redirect(url_for("home"))
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=7001, debug=True)
