@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container">
+    <h2 class="mt-4">Announcements</h2>
+
+    <div class="card my-4">
+        <div class="card-header">
+            Publish Announcement
+        </div>
+        <div class="card-body">
+            <form action="{{ url_for('announcements') }}" method="POST">
+                <div class="form-group">
+                    <label for="message">Message</label>
+                    <textarea class="form-control" id="message" name="message" rows="3" required></textarea>
+                </div>
+                <button type="submit" class="btn btn-primary">Publish</button>
+            </form>
+        </div>
+    </div>
+
+    <div class="card my-4">
+        <div class="card-header">
+            Published Announcements
+        </div>
+        <div class="card-body">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Message</th>
+                        <th>Timestamp</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for ann in announcements %}
+                    <tr>
+                        <td>{{ ann.id }}</td>
+                        <td>{{ ann.message }}</td>
+                        <td>{{ ann.timestamp | datetimeformat }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

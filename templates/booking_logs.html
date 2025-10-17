@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container">
+    <h2 class="mt-4">Booking Logs</h2>
+
+    <div class="card my-4">
+        <div class="card-header">
+            All Bookings
+        </div>
+        <div class="card-body">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>User</th>
+                        <th>Room</th>
+                        <th>Start Time</th>
+                        <th>End Time</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for booking in bookings %}
+                    <tr>
+                        <td>{{ booking.id }}</td>
+                        <td>{{ booking.full_name }}</td>
+                        <td>{{ booking.room_name }}</td>
+                        <td>{{ booking.start_time | datetimeformat }}</td>
+                        <td>{{ booking.end_time | datetimeformat }}</td>
+                        <td>{{ booking.status }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
