@@ -19,7 +19,23 @@ db = Database(DB_FILE)
 
 @app.template_filter('datetimeformat')
 def datetimeformat(value):
-    return datetime.fromtimestamp(int(value)).strftime('%Y-%m-%d %H:%M:%S')
+    if not value:
+        return ""
+    try:
+        # It might be a timestamp
+        return datetime.fromtimestamp(int(value)).strftime('%Y-%m-%d %H:%M:%S')
+    except (ValueError, TypeError):
+        # It might be a datetime string
+        try:
+            # Handle formats with and without microseconds
+            if '.' in value:
+                dt = datetime.strptime(value, '%Y-%m-%d %H:%M:%S.%f')
+            else:
+                dt = datetime.strptime(value, '%Y-%m-%d %H:%M:%S')
+            return dt.strftime('%Y-%m-%d %H:%M:%S')
+        except (ValueError, TypeError):
+            # If all else fails, return the original value
+            return value
 
 # ---------- LOGIN ----------
 @app.route("/", methods=["GET", "POST"])
@@ -48,40 +64,76 @@ def logout():
 def dashboard():
     if "admin" not in session:
         return redirect(url_for("login"))
-    return render_template("admin_dashboard.html")
+    conn = db.conn
+    user_count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+    room_count = conn.execute("SELECT COUNT(*) FROM rooms").fetchone()[0]
+    booking_count = conn.execute("SELECT COUNT(*) FROM bookings").fetchone()[0]
+    recent_bookings = conn.execute("SELECT b.*, u.full_name, r.room_name FROM bookings b LEFT JOIN users u ON b.user_id = u.id LEFT JOIN rooms r ON b.room_id = r.id ORDER BY b.start_time DESC LIMIT 5").fetchall()
+    room_statuses = conn.execute("SELECT * FROM rooms").fetchall()
+    return render_template("admin-dashboard.html", user_count=user_count, room_count=room_count, booking_count=booking_count, recent_bookings=recent_bookings, room_statuses=room_statuses)
+
 
 # ---------- USERS ----------
 @app.route("/users")
 def manage_users():
+    if "admin" not in session:
+        return redirect(url_for("login"))
     conn = db.conn
     users = conn.execute("SELECT * FROM users").fetchall()
     return render_template("users.html", users=users)
 
 @app.route("/create_security", methods=["POST"])
 def create_security():
+    if "admin" not in session:
+        return redirect(url_for("login"))
     name = request.form["name"]
     email = request.form["email"]
     password = request.form["password"]
     # Assuming a dummy user_id for security staff, or generate one if needed
-    new_user = User(email=email, password=password, full_name=name, user_id=email, role='security')
+    new_user = User(email=email, password=password, full_name=name, user_id=email, role='security', user_token=email)
     db.create_user(new_user)
     flash("Security staff created.")
     return redirect(url_for("manage_users"))
 
 @app.route("/delete_user/<int:user_id>")
 def delete_user(user_id):
+    if "admin" not in session:
+        return redirect(url_for("login"))
     conn = db.conn
     conn.execute("DELETE FROM users WHERE id=?", (user_id,))
     conn.commit()
     flash("User deleted.")
     return redirect(url_for("manage_users"))
 
+@app.route("/edit_user/<int:user_id>", methods=["GET"])
+def edit_user(user_id):
+    if "admin" not in session:
+        return redirect(url_for("login"))
+    conn = db.conn
+    user = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+    return render_template("edit_user.html", user=user)
+
+@app.route("/update_user/<int:user_id>", methods=["POST"])
+def update_user(user_id):
+    if "admin" not in session:
+        return redirect(url_for("login"))
+    name = request.form["name"]
+    email = request.form["email"]
+    role = request.form["role"]
+    conn = db.conn
+    conn.execute("UPDATE users SET full_name=?, email=?, role=? WHERE id=?", (name, email, role, user_id))
+    conn.commit()
+    flash("User updated.")
+    return redirect(url_for("manage_users"))
+
 # ---------- ROOMS ----------
 @app.route("/rooms")
 def rooms():
+    if "admin" not in session:
+        return redirect(url_for("login"))
     conn = db.conn
     rooms = conn.execute("""
-        SELECT r.id, r.status,
+        SELECT r.id, r.room_name, r.status,
                sd.temperature, sd.humidity, sd.pressure, sd.timestamp
         FROM rooms r
         LEFT JOIN (
@@ -98,6 +150,8 @@ def rooms():
 
 @app.route("/update_room_status", methods=["POST"])
 def update_room_status():
+    if "admin" not in session:
+        return redirect(url_for("login"))
     room_id = request.form["room_id"]
     new_status = request.form["status"]
     conn = db.conn
@@ -109,9 +163,12 @@ def update_room_status():
 # ---------- ANNOUNCEMENTS ----------
 @app.route("/announcements", methods=["GET", "POST"])
 def announcements():
+    if "admin" not in session:
+        return redirect(url_for("login"))
     conn = db.conn
     if request.method == "POST":
         msg = request.form["message"]
+        #TODO: get admin id from session
         conn.execute("INSERT INTO announcements (admin_id, target_audience, message) VALUES (1, 'all', ?)", (msg,))
         conn.commit()
         flash("Announcement published!")
@@ -122,30 +179,56 @@ def announcements():
 # ---------- LOGS ----------
 @app.route("/logs")
 def logs():
+    if "admin" not in session:
+        return redirect(url_for("login"))
     conn = db.conn
-    logs = conn.execute("SELECT * FROM logs ORDER BY timestamp DESC").fetchall()
+    logs = conn.execute("SELECT l.*, u.full_name FROM logs l LEFT JOIN users u ON l.user_id = u.id ORDER BY l.timestamp DESC").fetchall()
     return render_template("logs.html", logs=logs)
+
+# ---------- BOOKING LOGS ----------
+@app.route("/booking_logs")
+def booking_logs():
+    if "admin" not in session:
+        return redirect(url_for("login"))
+    conn = db.conn
+    bookings = conn.execute("SELECT b.*, u.full_name, r.room_name FROM bookings b LEFT JOIN users u ON b.user_id = u.id LEFT JOIN rooms r ON b.room_id = r.id ORDER BY b.start_time DESC").fetchall()
+    return render_template("booking_logs.html", bookings=bookings)
+
 
 # ---------- REPORTS ----------
 @app.route("/reports")
 def reports():
+    if "admin" not in session:
+        return redirect(url_for("login"))
     conn = db.conn
     data = conn.execute("SELECT room_id, COUNT(*) AS count FROM bookings GROUP BY room_id").fetchall()
+    
+    if not data:
+        return render_template("reports.html", plot_data=None)
+
     rooms = [f"Room {r['room_id']}" for r in data]
     counts = [r["count"] for r in data]
+    
+    plt.figure(figsize=(10, 5))
     plt.bar(rooms, counts)
     plt.title("Room Usage Frequency")
     plt.xlabel("Room")
-    plt.ylabel("Bookings")
+    plt.ylabel("Number of Bookings")
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+
     buf = io.BytesIO()
     plt.savefig(buf, format="png")
     buf.seek(0)
     plot_data = base64.b64encode(buf.getvalue()).decode()
+    
     return render_template("reports.html", plot_data=plot_data)
 
 # ---------- SENSOR HISTORY ----------
 @app.route("/sensor_history/<int:room_id>")
 def sensor_history(room_id):
+    if "admin" not in session:
+        return redirect(url_for("login"))
     conn = db.conn
     rows = conn.execute(
         "SELECT timestamp, temperature, humidity, pressure FROM sensor_data WHERE room_id=? ORDER BY timestamp DESC LIMIT 20",
@@ -164,4 +247,3 @@ def sensor_history(room_id):
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8001, debug=True)
-
