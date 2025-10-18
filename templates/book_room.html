@@ -76,6 +76,15 @@
     {% else %}
         <div class="alert alert-info text-center">No rooms available at the moment.</div>
     {% endif %}
+    {% with messages = get_flashed_messages() %}
+    {% if messages %}
+        <div class="alert alert-warning">
+        {% for message in messages %}
+            <p>{{ message }}</p>
+        {% endfor %}
+        </div>
+    {% endif %}
+    {% endwith %}
 
     <div class="text-center mt-4">
         <a href="{{ url_for('home') }}" class="btn btn-secondary">Back to Home</a>

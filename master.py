@@ -53,7 +53,7 @@ class Master:
                     """
                     SELECT start_time, end_time 
                     FROM bookings 
-                    WHERE room_id=? AND start_time>=? AND start_time<? AND end_time>=?
+                    WHERE room_id=? AND start_time>=? AND start_time<? AND end_time>=? AND status <> 'checked out'
                     ORDER BY start_time ASC
                     """,
                     (room_id_getter, today, tomorrow, now)
@@ -155,7 +155,7 @@ class Master:
                     self.db.create_room(new_room)
                 else:
                     room_bookings = self.db.conn.execute(
-                        "SELECT * FROM bookings WHERE room_id=?",
+                        "SELECT * FROM bookings WHERE room_id=? and status <> 'checked out'",
                         (room_id,)
                     ).fetchall()
                     for booking in room_bookings:
@@ -208,7 +208,7 @@ class Master:
             return {
                 "op": "LOG", "action": "booking",
                 "type": "success", "message": "Booking successful",
-                "booking_id": booking_id
+                "booking_id": booking_id, "room id": request['room_id']
             }
         except Exception as e:
             return {
@@ -277,7 +277,7 @@ class Master:
                 self.db.conn.commit()
                 return {
                     "op": "LOG", "action": "check in", "type": "success",
-                    "message": "Check-in successful", "booking_id": booking_id
+                    "message": "Check-in successful", "booking_id": booking_id, "room id": request['room_id']
                 }   
     def check_out(self, request: dict):
         with self.db_lock:
@@ -299,7 +299,7 @@ class Master:
                 self.db.conn.commit()
                 return {
                     "op": "LOG", "action": "check out", "type": "success",
-                    "message": "Check-out successful", "booking_id": booking_id
+                    "message": "Check-out successful", "booking_id": booking_id, "room id": request['room_id']
                 }
 
     def cancel_booking(self, request: dict):
@@ -325,7 +325,7 @@ class Master:
                 self.db.conn.commit()
                 return {
                     "op": "LOG", "action": "cancel booking", "type": "success",
-                    "message": "Booking cancelled successfully", "booking_id": booking_id
+                    "message": "Booking cancelled successfully", "booking_id": booking_id, "room id": request["room_id"]
                 }
 
     # -------------------------
@@ -346,14 +346,17 @@ class Master:
                         msg = f"Room {log['room id']} connected successfully."
                         self.db.create_log(None, "room connection", msg)
                     elif log["action"] == "check in":
-                        msg = f"User checked in to room {log['room_id']} successfully."
+                        msg = f"User checked in to room {log['room id']} successfully."
                         self.db.create_log(None, "check in", msg)
                     elif log["action"] == "check out":
-                        msg = f"User checked out of room {log['room_id']} successfully."
+                        msg = f"User checked out of room {log['room id']} successfully."
                         self.db.create_log(None, "check out", msg)
                     elif log["action"] == "booking":
-                        msg = f"Room {log['room_id']} booked successfully."
+                        msg = f"Room {log['room id']} booked successfully."
                         self.db.create_log(None, "booking", msg)
+                    elif log["action"]== "cancel booking":
+                        msg = f"Booking {log['booking_id']} on room {log['room id']} has been canceled"
+                        self.db.create_log(None, "cancel booking", msg)
                 elif log["type"] == "failure":
                     self.db.create_log(None, log["action"], log["reason"])
 
@@ -369,14 +372,22 @@ class Master:
                 response = self.login_user(request)
             elif request["op"] == "ACTIVATED_ROOM":
                 response = self.activated_room(request)
+            elif request["op"] == "UPDATE_ROOMS":
+                response = {
+                    "op": "LOG", "action": "update rooms",
+                    "type": "success", "rooms": self.get_room_inf()
+                }
             elif request["op"] == "LOG":
                 print(request["action"])
                 if request["type"] == "success" and request["action"] == "booking":
                     response = self.book_room(request)
+                    print(response)
                 elif request["type"] == "success" and request["action"] == "check in":
                     response  = self.check_in(request)
+                    print(response)
                 elif request["type"] == "success" and request["action"] == "check out":
                     response = self.check_out(request)
+                    print(response)
                 elif request["type"] == "success" and request["action"] == "cancel booking":
                     response = self.cancel_booking(request)
                 else:
