@@ -32,10 +32,10 @@ class Database:
         return cur.lastrowid
 
     def create_room(self, room: Room):
-        sql = '''INSERT INTO rooms(room_name,status)
-                  VALUES(?,?)'''
+        sql = '''INSERT INTO rooms(room_name, location, capacity, status)
+                  VALUES(?,?,?,?)'''
         cur = self.conn.cursor()
-        cur.execute(sql, (room.room_name, room.status))
+        cur.execute(sql, (room.room_name, room.location, room.capacity, room.status))
         self.conn.commit()
         return cur.lastrowid
 
@@ -78,6 +78,8 @@ class Database:
         sql_create_rooms_table = """CREATE TABLE IF NOT EXISTS rooms (
                                         id integer PRIMARY KEY autoincrement,
                                         room_name text NOT NULL UNIQUE,
+                                        location text,
+                                        capacity integer,
                                         status text NOT NULL
                                     );"""
 
@@ -112,12 +114,22 @@ class Database:
                                         FOREIGN KEY (user_id) REFERENCES users (id)
                                     );"""
 
+        sql_create_announcements_table = """CREATE TABLE IF NOT EXISTS announcements (
+                                            id integer PRIMARY KEY autoincrement,
+                                            admin_id integer NOT NULL,
+                                            message text NOT NULL,
+                                            timestamp datetime NOT NULL,
+                                            target_audience text NOT NULL,
+                                            FOREIGN KEY (admin_id) REFERENCES users (id)
+                                        );"""
+
         if self.conn is not None:
             self.create_table(sql_create_users_table)
             self.create_table(sql_create_rooms_table)
             self.create_table(sql_create_bookings_table)
             self.create_table(sql_create_sensor_data_table)
             self.create_table(sql_create_logs_table)
+            self.create_table(sql_create_announcements_table)
 
 
 def seed_data(db: Database):
@@ -130,14 +142,14 @@ def seed_data(db: Database):
     db.conn.commit()
 
     # Seed users
-    db.create_user(User('admin@test.com', 'admin', 'Admin', '100', 'admin'))
-    db.create_user(User('security@test.com', 'security', 'Security', '200', 'security'))
+    db.create_user(User('admin@test.com', 'admin', 'Admin', '100', 'admin', 'admin'))
+    db.create_user(User('security@test.com', 'security', 'Security', '200', 'security', 'security'))
     db.create_user(User('student1@test.com', 'student', 'Smith', 's1234567', 'user'))
     db.create_user(User('student2@test.com', 'student', 'John', 's1111111', 'user'))
 
     # Seed rooms
-    db.create_room(Room('Science Room', 'Building 52', '20', 'Available', '1'))
-    db.create_room(Room('Art Room', 'Building 90', '25', 'Available', '2'))
+    db.create_room(Room('Science Room', 'Building 52', 20, 'Available'))
+    db.create_room(Room('Art Room', 'Building 90', 25, 'Available'))
     db.conn.commit()
 
 def main():

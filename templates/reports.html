@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container">
+    <h2 class="mt-4">Reports</h2>
+
+    <div class="card my-4">
+        <div class="card-header">
+            Room Usage Frequency
+        </div>
+        <div class="card-body">
+            {% if plot_data %}
+                <img src="data:image/png;base64,{{ plot_data }}" alt="Room Usage Frequency">
+            {% else %}
+                <p>No booking data available to generate a report.</p>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

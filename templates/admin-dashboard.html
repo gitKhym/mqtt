@@ -1,0 +1,133 @@
+{% extends "base.html" %} {% block content %}
+<div class="container-fluid">
+  <h1 class="mt-4">Dashboard</h1>
+
+  <!-- Stats -->
+  <div class="row">
+    <div class="col-xl-3 col-md-6 mb-4">
+      <div class="card border-left-primary shadow h-100 py-2">
+        <div class="card-body">
+          <div class="row no-gutters align-items-center">
+            <div class="col mr-2">
+              <div class="text-xs font-weight-bold text-uppercase mb-1">
+                Users
+              </div>
+              <div class="h5 mb-0 font-weight-bold text-gray-800">
+                {{ user_count }}
+              </div>
+            </div>
+            <div class="col-auto">
+              <i class="fas fa-users fa-2x text-gray-300"></i>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-xl-3 col-md-6 mb-4">
+      <div class="card border-left-success shadow h-100 py-2">
+        <div class="card-body">
+          <div class="row no-gutters align-items-center">
+            <div class="col mr-2">
+              <div class="text-xs font-weight-bold text-uppercase mb-1">
+                Rooms
+              </div>
+              <div class="h5 mb-0 font-weight-bold text-gray-800">
+                {{ room_count }}
+              </div>
+            </div>
+            <div class="col-auto">
+              <i class="fas fa-door-open fa-2x text-gray-300"></i>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-xl-3 col-md-6 mb-4">
+      <div class="card border-left-info shadow h-100 py-2">
+        <div class="card-body">
+          <div class="row no-gutters align-items-center">
+            <div class="col mr-2">
+              <div class="text-xs font-weight-bold text-uppercase mb-1">
+                Bookings
+              </div>
+              <div class="h5 mb-0 font-weight-bold text-gray-800">
+                {{ booking_count }}
+              </div>
+            </div>
+            <div class="col-auto">
+              <i class="fas fa-calendar-alt fa-2x text-gray-300"></i>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Content Row -->
+  <div class="row">
+    <!-- Recent Bookings -->
+    <div class="col-xl-8 col-lg-7">
+      <div class="card shadow mb-4">
+        <div class="card-header py-3">
+          <h6 class="m-0 font-weight-bold">Recent Bookings</h6>
+        </div>
+        <div class="card-body">
+          <div class="table-responsive">
+            <table class="table table-bordered" id="dataTable" width="100%" cellspacing="0">
+              <thead>
+                <tr>
+                  <th>User</th>
+                  <th>Room</th>
+                  <th>Start Time</th>
+                  <th>End Time</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for booking in recent_bookings %}
+                <tr>
+                  <td>{{ booking.full_name }}</td>
+                  <td>{{ booking.room_name }}</td>
+                  <td>{{ booking.start_time | datetimeformat }}</td>
+                  <td>{{ booking.end_time | datetimeformat }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Room Statuses -->
+    <div class="col-xl-4 col-lg-5">
+      <div class="card shadow mb-4">
+        <div class="card-header py-3">
+          <h6 class="m-0 font-weight-bold">Room Status</h6>
+        </div>
+        <div class="card-body">
+          <div class="table-responsive">
+            <table class="table table-bordered" id="dataTable" width="100%" cellspacing="0">
+              <thead>
+                <tr>
+                  <th>Room</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for room in room_statuses %}
+                <tr>
+                  <td>{{ room.room_name }}</td>
+                  <td>{{ room.status }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
