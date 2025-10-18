@@ -5,6 +5,10 @@ MQTT_IP = "localhost"
 MQTT_PORT = 1883
 TOPIC_ALL = "classroom/all"
 TOPIC_SECURITY = "classroom/security"
+TOPIC_ROOM_SENSOR_DATA_PREFIX = "rooms/" # rooms/<room_id>/sensor
+TOPIC_ROOM_COMMAND_PREFIX = "rooms/"     # rooms/<room_id>/command
+TOPIC_ANNOUNCEMENTS = "announcements"
+TOPIC_ROOM_REGISTER = "rooms/register"
 
 # Socket Configuration
 SOCKET_HOST = "0.0.0.0"
