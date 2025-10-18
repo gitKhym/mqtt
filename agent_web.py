@@ -1,7 +1,10 @@
+from typing import List
 from agent import Agent
 import sys
 import os
 import json
+
+from models.room import Room
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, redirect, url_for, session, flash
@@ -19,7 +22,15 @@ def send_to_master(message):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.connect((SOCKET_HOST, SOCKET_PORT))
         s.sendall(message.encode())
-        response = s.recv(1024).decode()
+        
+        # Receive all data until connection is closed
+        total_data = []
+        while True:
+            data = s.recv(4096) # Receive in chunks
+            if not data:
+                break
+            total_data.append(data.decode())
+        response = "".join(total_data)
         return response
 
 def send_to_room(ip, port, message):
@@ -162,22 +173,23 @@ def booking():
 
         booking_request = {
             "op": "BOOK_ROOM",
+            "room_id": room_id,
             "starttime": starttime.isoformat(),
             "duration": duration_hours * 3600,  
             "token": session["token"]
         }
-        room_ip = session["rooms"][f"{room_id}"]["ip"]
-        print(room_ip)
-        room_port = session["rooms"][f"{room_id}"]["port"]
-        print(room_port)
+        # room_ip = session["rooms"][f"{room_id}"]["ip"]
+        # print(room_ip)
+        # room_port = session["rooms"][f"{room_id}"]["port"]
+        # print(room_port)
         msg = json.dumps(booking_request)
         print(msg)
-        response = json.loads(send_to_room(room_ip,room_port,msg))
+        response = json.loads(send_to_master(msg))
 
         return redirect(url_for("home"))
      
 
-    rooms = session.get("rooms", {})
+    rooms: List[Room] = session.get("rooms", {})
     print(rooms)
     return render_template("book_room.html", rooms=rooms)
 
@@ -221,7 +233,7 @@ def handle_bookings():
         }
         msg = json.dumps(msg)
         print(msg)
-        response = json.loads(send_to_room(room_ip,room_port,msg))
+        response = json.loads(send_to_master(msg)) # Changed to send_to_master
         if response["type"] == "success":
             flash("Booking cancelled successfully.")
         else:
@@ -236,7 +248,7 @@ def handle_bookings():
             "token": session["token"]
         }
         
-        response = json.loads(send_to_room(room_ip,room_port,json.dumps(msg)))
+        response = json.loads(send_to_master(json.dumps(msg))) # Changed to send_to_master
         if response["type"] == "success":
             flash("Checked in successfully.")
         else:
@@ -248,7 +260,7 @@ def handle_bookings():
             "starttime": full_date,
             "token": session["token"]
         }
-        response = json.loads(send_to_room(room_ip,room_port,json.dumps(msg)))
+        response = json.loads(send_to_master(json.dumps(msg))) # Changed to send_to_master
         if response["type"] == "success":
             flash("Checked out successfully.")
         else:
