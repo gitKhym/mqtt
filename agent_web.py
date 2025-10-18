@@ -7,7 +7,7 @@ import json
 from models.room import Room
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from datetime import datetime, timedelta
-from flask import Flask, render_template, request, redirect, url_for, session, flash
+from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify, jsonify
 import socket
 from config import SOCKET_HOST, SOCKET_PORT
 
@@ -149,9 +149,7 @@ def home():
 
 @app.route("/logout")
 def logout():
-    session.pop("user_email", None)
-    session.pop("user_id", None)
-    session.pop("user_role", None)
+    session.clear()
     flash("You have been logged out.")
     return redirect(url_for("index"))
 
@@ -267,6 +265,44 @@ def handle_bookings():
             flash("Failed to check out.")
 
     return redirect(url_for("my_bookings"))
+
+
+@app.route("/api/rooms")
+def api_rooms():
+    if "token" not in session:
+        return jsonify({"error": "Not authenticated"}), 401
+    
+    msg = {
+        "op": "GET_ROOMS"
+    }
+    response_str = send_to_master(json.dumps(msg))
+    try:
+        response = json.loads(response_str)
+        if response.get("type") == "success":
+            return jsonify(response.get("rooms", {}))
+        else:
+            return jsonify({"error": "Failed to retrieve rooms", "details": response.get("reason")}), 500
+    except (json.JSONDecodeError, AttributeError):
+        return jsonify({"error": "Invalid response from master"}), 500
+
+@app.route("/api/my-bookings")
+def api_my_bookings():
+    if "token" not in session:
+        return jsonify({"error": "Not authenticated"}), 401
+    
+    msg = {
+        "op": "GET_BOOKINGS",
+        "token": session["token"]
+    }
+    response_str = send_to_master(json.dumps(msg))
+    try:
+        response = json.loads(response_str)
+        if response.get("type") == "success":
+            return jsonify(response.get("bookings", []))
+        else:
+            return jsonify({"error": "Failed to retrieve bookings", "details": response.get("reason")}), 500
+    except (json.JSONDecodeError, AttributeError):
+        return jsonify({"error": "Invalid response from master"}), 500
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=7001, debug=True)

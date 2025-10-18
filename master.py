@@ -64,6 +64,8 @@ class Master:
                 )
 
                 self.db.conn.commit()
+                if room_id in self.active_rooms:
+                    self.active_rooms[room_id]['status'] = status
                 print(f"MQTT | Received sensor data for room {room_id}: {payload}")
             except Exception as e:
                 print(f"MQTT | Error processing sensor data for room {room_id}: {e}")
@@ -134,12 +136,22 @@ class Master:
     # -------------------------
 
     def get_room_inf(self):
-        active_rooms_copy = dict(self.active_rooms)
+        # Get all rooms from the database as the source of truth
+        all_rooms_from_db = self.db.conn.execute("SELECT * FROM rooms").fetchall()
+        
+        # Use a dictionary for easy lookup and modification
+        rooms_map = {room['id']: dict(room) for room in all_rooms_from_db}
+
         today = datetime.now(ZoneInfo("Australia/Melbourne")).replace(tzinfo=None).replace(hour=0, minute=0, second=0, microsecond=0)
         tomorrow = today + timedelta(days=1)
         now = datetime.now(ZoneInfo("Australia/Melbourne")).replace(tzinfo=None)
-        for room in active_rooms_copy.values():
-            room_id = room['id']  # Use the correct ID from the active_rooms dict
+
+        for room_id, room in rooms_map.items():
+            # Enrich with live data from active_rooms if available
+            if room_id in self.active_rooms:
+                room.update(self.active_rooms[room_id])
+
+            # The rest of the logic is the same, just applied to `room`
             room_bookings = self.db.conn.execute(
                 """
                 SELECT b.start_time, b.end_time, u.full_name
@@ -180,7 +192,7 @@ class Master:
                 room["humidity"] = "N/A"
                 room["pressure"] = "N/A"
 
-        return active_rooms_copy
+        return rooms_map
         
     def register_user(self, request: dict):
         full_name = request["Full_Name"]
@@ -547,6 +559,9 @@ class Master:
                     response = request
             elif request["op"] == "GET_BOOKINGS":
                 response = self.get_bookings(request["token"])
+            elif request["op"] == "GET_ROOMS":
+                rooms_data = self.get_room_inf()
+                response = {"op": "GET_ROOMS", "type": "success", "rooms": rooms_data}
             else:
                 response = {
                     "op": request.get("op"),
