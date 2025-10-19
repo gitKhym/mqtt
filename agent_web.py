@@ -15,7 +15,6 @@ app = Flask(__name__)
 
 app.secret_key = "supersecretkey"
 rooms = {}
-bookings_list = []
 
 
 def send_to_master(message):
@@ -164,17 +163,17 @@ def booking():
         booking_request = {
             "op": "BOOK_ROOM",
             "starttime": starttime.isoformat(),
-            "duration": duration_hours * 3600,
-            "user_token": session['token'],
-            'room_id': room_id
+            "duration": duration_hours * 3600,  
+            "token": session["token"]
         }
+        room_ip = session["rooms"][f"{room_id}"]["ip"]
+        print(room_ip)
+        room_port = session["rooms"][f"{room_id}"]["port"]
+        print(room_port)
         msg = json.dumps(booking_request)
         print(msg)
-        response = json.loads(send_to_master(msg))
+        response = json.loads(send_to_room(room_ip,room_port,msg))
         if response["type"] == "success":
-            booking_id = request['booking_id']
-            booking_token = request['booking_token']
-            bookings_list.append((booking_id,booking_token))
             flash("Room booked successfully.")
         else:
             flash("Failed to book the room." + response["reason"])
@@ -211,10 +210,6 @@ def handle_bookings():
     if "token" not in session:
         return redirect(url_for("login"))
     booking_id = request.form.get("booking_id")
-    token = None
-    for b in bookings_list:
-        if b[0] == booking_id:
-            token = b[1]
     room_id = request.form.get("room_id")
     full_date = request.form.get("full_date")
     end_time = request.form.get("end_time")
@@ -234,9 +229,6 @@ def handle_bookings():
         print(msg)
         response = json.loads(send_to_room(room_ip,room_port,msg))
         if response["type"] == "success":
-            for b in bookings_list:
-                if b[0] == booking_id:
-                    bookings_list.remove(b)
             flash("Booking cancelled successfully.")
         else:
             flash("Failed to cancel booking.")

@@ -36,17 +36,6 @@ class Master:
     # User Registration
     # -------------------------
 
-    def send_to_room(ip, port, message):
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        try:
-            s.connect((ip, port))
-            s.sendall(message.encode())
-            response = s.recv(4096).decode()
-            return response
-        except Exception as e:
-            print(f"Error connecting to room at {ip}:{port} - {e}")
-            return None
-
     def get_room_inf(self):
         with self.rooms_lock:
             active_rooms_copy = dict(self.active_rooms)
@@ -333,56 +322,25 @@ class Master:
     # Room Booking
     # -------------------------
     def book_room(self, request: dict):
-        '''
-        {
-            "op": "BOOK_ROOM",
-            "starttime": starttime.isoformat(),
-            "duration": duration_hours * 3600,
-            "user_token": session['token']
-        }
-        '''
         with self.db_lock:
             user_id = self.db.conn.execute(
                 "SELECT id FROM users WHERE user_token=?",
-                (request["user_token"],)
+                (request["token"],)
             ).fetchone()["id"]
 
         room_id = request["room_id"]
-        start_time = datetime.fromisoformat(request["starttime"])
-        end_time = start_time + timedelta(seconds=request['duration'])
-        booking_token = str(binascii.hexlify(os.urandom(20)).decode())
-        now = datetime.now(ZoneInfo("Australia/Melbourne")).replace(tzinfo=None)
-        if start_time < now:
-            return {"op": "LOG", "action": "booking", "room_id": room_id,
-                    "type": "failure", "reason": "Cannot book for past time"}
-        with self.db_lock:
-            list_of_bookings = self.db.conn.execute(
-                "SELECT start_time , end_time from bookings where room_id = ?",
-                (room_id,)
-            ).fetchall
-        for b in list_of_bookings:
-                print(b["starttime"], b["endtime"])
-                if start_time < b["endtime"] and end_time > b["starttime"]:
-                    return {"op": "LOG", "action": "booking", "room_id": room_id,
-                            "type": "failure", "reason": "Time slot already booked"}
+        start_time = request["starttime"]
+        end_time = request["endtime"]
+        token = request["token"]
         booking = Booking(user_id=user_id, room_id=room_id,
-                          start_time=start_time, end_time=end_time, token=booking_token)
-        
+                          start_time=start_time, end_time=end_time, token=token)
         try:
             with self.db_lock:
                 booking_id = self.db.create_booking(booking)
-            room_msg  = {"op":"BOOK_ROOM",
-            "starttime":start_time.isoformat(),
-            "endtime ": end_time.isoformat(),
-            "token":booking_token}
-            room_ip = self.active_rooms[str(room_id)]['ip']
-            room_port = self.active_rooms[str(room_id)]['port']
-            self.send_to_room(room_ip, room_port, json.dumps(room_msg))
             return {
                 "op": "LOG", "action": "booking",
                 "type": "success", "message": "Booking successful",
-                "booking_id": booking_id, "room id": request['room_id'], 
-                'booking_token' : booking_token
+                "booking_id": booking_id, "room id": request['room_id']
             }
         except Exception as e:
             return {
@@ -573,11 +531,12 @@ class Master:
                 response = self.get_booking_logs()
             elif request['op'] == 'GET BOOKING COUNT':
                 response = self.get_booking_count()
-            elif request['op'] == 'BOOK_ROOM':
-                response = self.book_room(request)
             elif request["op"] == "LOG":
                 print(request["action"])
-                if request["type"] == "success" and request["action"] == "check in":
+                if request["type"] == "success" and request["action"] == "booking":
+                    response = self.book_room(request)
+                    print(response)
+                elif request["type"] == "success" and request["action"] == "check in":
                     response  = self.check_in(request)
                     print(response)
                 elif request["type"] == "success" and request["action"] == "check out":
