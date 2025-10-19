@@ -12,6 +12,50 @@
       rel="stylesheet"
       href="https://use.fontawesome.com/releases/v5.15.1/css/all.css"
     />
+
+    <style>
+      body {
+        background-color: #f4f6f9;
+      }
+
+      .room-card {
+        border-radius: 12px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        background: white;
+        padding: 20px;
+        margin-bottom: 20px;
+      }
+
+      .room-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .status {
+        font-weight: bold;
+      }
+
+      .status.Available {
+        color: green;
+      }
+
+      .status.Occupied {
+        color: yellow;
+      }
+
+      .status.Maintenance {
+        color: orange;
+      }
+
+      .status.Fault {
+        color: red;
+      }
+
+      .booking-form {
+        margin-top: 15px;
+      }
+    </style>
   </head>
   <body>
     <nav class="navbar navbar-expand-lg navbar-light bg-blue">
@@ -49,7 +93,7 @@
             >
           </li>
           <li class="nav-item">
-            <a class="nav-link" href="{{ url_for('reports') }}">Reports</a>
+            <a class="nav-link" href="{{ url_for('view_reports') }}">Reports</a>
           </li>
         </ul>
         <ul class="navbar-nav ml-auto">

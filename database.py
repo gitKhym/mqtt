@@ -148,8 +148,8 @@ def seed_data(db: Database):
     db.create_user(User('student2@test.com', 'student', 'John', 's1111111', 'user'))
 
     # Seed rooms
-    db.create_room(Room('Science Room', 'Building 52', 20, 'Available'))
-    db.create_room(Room('Art Room', 'Building 90', 25, 'Available'))
+    # db.create_room(Room('Science Room', 'Building 52', 20, 'Available'))
+    # db.create_room(Room('Art Room', 'Building 90', 25, 'Available'))
     db.conn.commit()
 
 def main():
