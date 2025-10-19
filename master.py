@@ -6,6 +6,7 @@ from database import Database
 from models.user import User
 from models.room import Room
 from models.booking import Booking
+from models.status import Status
 import config
 
 from paho.mqtt.client import Client, MQTTMessage, ConnectFlags
@@ -156,27 +157,27 @@ class Master:
 
             # Prioritize manually set status from DB
             db_status = room['status']
-            if db_status in ['Maintenance', 'Fault', 'Occupied']:
+            if db_status in [Status.MAINTENANCE.value, Status.FAULT.value, Status.OCCUPIED.value]:
                 room['status'] = db_status
             else:
                 # Check for active bookings at the current time
                 future_booking = self.db.conn.execute("""
                     SELECT 1 FROM bookings 
-                    WHERE room_id = ? AND start_time <= ? AND end_time > ? AND status IN ('Booked', 'checked in')
+                    WHERE room_id = ? AND start_time <= ? AND end_time > ? AND status IN (?, ?)
                     LIMIT 1
-                """, (room_id, now, now)).fetchone()
+                """, (room_id, now, now, Status.BOOKED.value, Status.CHECKED_IN.value)).fetchone()
 
                 if future_booking:
-                    room['status'] = 'Booked'
+                    room['status'] = Status.BOOKED.value
                 else:
-                    room['status'] = 'Available'
+                    room['status'] = Status.AVAILABLE.value
 
             room_bookings = self.db.conn.execute(
                 """
                 SELECT b.start_time, b.end_time, u.full_name
                 FROM bookings b
                 JOIN users u ON b.user_id = u.id
-                WHERE b.room_id=? AND b.start_time>=? AND b.start_time<? AND b.end_time>=? AND b.status <> 'checked out'
+                WHERE b.room_id=? AND b.start_time>=? AND b.start_time<? AND b.end_time>=? AND b.status NOT IN ('checked out', 'Cancelled')
                 ORDER BY b.start_time ASC
                 """,
                 (room_id, today, tomorrow, now)
@@ -488,7 +489,7 @@ class Master:
 
         overlapping_bookings = self.db.conn.execute(
             """SELECT * FROM bookings 
-            WHERE room_id = ? AND (start_time < ? AND end_time > ?)
+            WHERE room_id = ? AND (start_time < ? AND end_time > ?) AND status NOT IN ('Cancelled', 'checked out')
             """,
             (room_id, end_time, start_time)
         ).fetchall()
@@ -505,14 +506,16 @@ class Master:
             # Update room status in DB
             self.db.conn.execute(
                 "UPDATE rooms SET status = ? WHERE id = ?",
-                ("Booked", room_id)
+                (Status.BOOKED.value, room_id)
             )
             self.db.conn.commit()
 
             # Publish MQTT message to room
             mqtt_payload = {
                 "op": "UPDATE_STATUS",
-                "status": "Booked"
+                "status": Status.BOOKED.value,
+                "booking_id": booking_id,
+                "booking_access_token": booking_access_token
             }
             self.mqtt_client.publish(config.TOPIC_ROOM_COMMAND_PREFIX + f"{room_id}/command", json.dumps(mqtt_payload))
 
@@ -545,7 +548,7 @@ class Master:
             bookings_list = []
             for booking in bookings_data:
                 print("[DEBUG] Processing booking:", dict(booking))
-                if booking["status"] in ('Booked', 'checked in'):
+                if booking["status"] in (Status.BOOKED.value, Status.CHECKED_IN.value):
                     bookings_list.append({
                         "booking_id": booking["id"],
                         "room_id": booking["room_id"],
@@ -572,41 +575,54 @@ class Master:
 
 
     def check_in(self, request: dict):
+        print(f"MASTER | check_in request: {request}")
         booking_id = request["booking_id"]
+    
         booking = self.db.conn.execute(
-            "SELECT * FROM bookings WHERE id=? and status='Booked'",
-            (booking_id,)
+            "SELECT * FROM bookings WHERE id=? and status=?",
+            (booking_id, Status.BOOKED.value)
         ).fetchone()
+        print(f"MASTER | check_in booking: {booking}")
         if not booking:
             return {
                 "op": "LOG", "action": "check in", "type": "failure",
-                "reason": "Check-in failed: Invalid booking ID or already checked in/out"
+                "reason": "Invalid booking ID or already checked in/out"
             }
-        else:
-            room_id = booking['room_id']
-            self.db.conn.execute(
-                        "UPDATE bookings SET status = ? WHERE id=?",
-                        ("checked in", booking_id)
-                    )
-            self.db.conn.commit()
 
-            # Publish MQTT message to room
-            mqtt_payload = {
-                "op": "UPDATE_STATUS",
-                "status": "Occupied"
-            }
-            self.mqtt_client.publish(config.TOPIC_ROOM_COMMAND_PREFIX + f"{room_id}/command", json.dumps(mqtt_payload))
+        now = datetime.now(ZoneInfo("Australia/Melbourne")).replace(tzinfo=None)
+        start_time = datetime.fromisoformat(booking['start_time'])
+        end_time = datetime.fromisoformat(booking['end_time'])
 
+        if not (start_time <= now and now < end_time):
             return {
-                "op": "LOG", "action": "check in", "type": "success",
-                "message": "Check-in successful", "booking_id": booking_id, "room id": room_id
-            }   
+                "op": "LOG", "action": "check in", "type": "failure",
+                "reason": "Check-in is not available at this time."
+            }
+
+        room_id = booking['room_id']
+        self.db.conn.execute(
+                    "UPDATE bookings SET status = ? WHERE id=?",
+                    (Status.CHECKED_IN.value, booking_id)
+                )
+        self.db.conn.commit()
+
+        # Publish MQTT message to room
+        mqtt_payload = {
+            "op": "UPDATE_STATUS",
+            "status": Status.OCCUPIED.value
+        }
+        self.mqtt_client.publish(config.TOPIC_ROOM_COMMAND_PREFIX + f"{room_id}/command", json.dumps(mqtt_payload))
+
+        return {
+            "op": "LOG", "action": "check in", "type": "success",
+            "message": "Check-in successful", "booking_id": booking_id, "room id": room_id
+        }
 
     def check_out(self, request: dict):
         booking_id = request["booking_id"]
         booking = self.db.conn.execute(
-            "SELECT * FROM bookings WHERE id=? and status='checked in'",
-            (booking_id,)
+            "SELECT * FROM bookings WHERE id=? and status=?",
+            (booking_id, Status.CHECKED_IN.value)
         ).fetchone()
         if not booking:
             return {
@@ -617,14 +633,14 @@ class Master:
             room_id = booking['room_id']
             self.db.conn.execute(
                         "UPDATE bookings SET status = ? WHERE id=?",
-                        ("checked out", booking_id)
+                        (Status.CHECKED_OUT.value, booking_id)
                     )
             self.db.conn.commit()
 
             # Publish MQTT message to room
             mqtt_payload = {
                 "op": "UPDATE_STATUS",
-                "status": "Available"
+                "status": Status.AVAILABLE.value
             }
             self.mqtt_client.publish(config.TOPIC_ROOM_COMMAND_PREFIX + f"{room_id}/command", json.dumps(mqtt_payload))
 
@@ -637,25 +653,36 @@ class Master:
         print("Entering cancel_booking with request:", request)
         booking_id = request["booking_id"]
         token = request["token"]
-        print(booking_id, token)
+        print(f"MASTER | cancel_booking request: {request}")
+        print(f"MASTER | cancel_booking booking_id: {booking_id}, token: {token}")
         booking = self.db.conn.execute(
-            "SELECT * FROM bookings WHERE id=? and token=? and status='Booked'",
-            (booking_id, token)
+            "SELECT * FROM bookings WHERE id=? and token=? and status=?",
+            (booking_id, token, Status.BOOKED.value)
         ).fetchone()
+        print(f"MASTER | cancel_booking booking: {booking}")
         if not booking:
             return {
                 "op": "LOG", "action": "cancel booking", "type": "failure",
                 "reason": "Cancellation failed: Invalid booking ID, token, or booking already checked in/out"
             }
         else:
+            room_id = booking['room_id']
             self.db.conn.execute(
-                        "DELETE FROM bookings WHERE id=?",
-                        (booking_id, )
+                        "UPDATE bookings SET status = ? WHERE id=?",
+                        (Status.CANCELLED.value, booking_id)
                     )
             self.db.conn.commit()
+
+            # Publish MQTT message to room
+            mqtt_payload = {
+                "op": "UPDATE_STATUS",
+                "status": Status.AVAILABLE.value
+            }
+            self.mqtt_client.publish(config.TOPIC_ROOM_COMMAND_PREFIX + f"{room_id}/command", json.dumps(mqtt_payload))
+
             return {
                 "op": "LOG", "action": "cancel booking", "type": "success",
-                "message": "Booking cancelled successfully", "booking_id": booking_id, "room id": request["room_id"]
+                "message": "Booking cancelled successfully", "booking_id": booking_id, "room id": room_id
             }
 
     def validate_booking_token(self, request: dict):
@@ -663,14 +690,58 @@ class Master:
         booking_access_token = request["booking_access_token"]
         now = datetime.now(ZoneInfo("Australia/Melbourne")).replace(tzinfo=None)
 
+        # First, check if the token and room_id exist at all
         booking = self.db.conn.execute(
             """SELECT * FROM bookings 
-            WHERE room_id = ? AND token = ? AND start_time <= ? AND end_time > ? AND status = 'Booked'
+            WHERE room_id = ? AND token = ?
             """,
-            (room_id, booking_access_token, now, now)
+            (room_id, booking_access_token)
         ).fetchone()
 
-        if booking:
+        if not booking:
+            return {
+                "op": "LOG", "action": "validate token", "type": "failure",
+                "reason": "Invalid token or room ID."
+            }
+
+        # Check if the booking is cancelled
+        if booking['status'] == Status.CANCELLED.value:
+            return {
+                "op": "LOG", "action": "validate token", "type": "failure",
+                "reason": "This booking has been cancelled."
+            }
+
+        # Check if the booking is already checked in or out
+        if booking['status'] == Status.CHECKED_IN.value:
+            return {
+                "op": "LOG", "action": "validate token", "type": "failure",
+                "reason": "This booking is already checked in."
+            }
+        if booking['status'] == Status.CHECKED_OUT.value:
+            return {
+                "op": "LOG", "action": "validate token", "type": "failure",
+                "reason": "This booking has already been checked out."
+            }
+
+        # Check if the current time is within the booking period
+        start_time = datetime.fromisoformat(booking['start_time'])
+        end_time = datetime.fromisoformat(booking['end_time'])
+
+        if not (start_time <= now and now < end_time):
+            if now < start_time:
+                return {
+                    "op": "LOG", "action": "validate token", "type": "failure",
+                    "reason": "Check-in failed: Check-in is not yet available for this booking."
+                }
+            # now >= end_time
+            else:
+                return {
+                    "op": "LOG", "action": "validate token", "type": "failure",
+                    "reason": "Check-in failed: This booking has expired."
+                }
+        
+        # If all checks pass, and status is BOOKED, then it's valid
+        if booking['status'] == Status.BOOKED.value:
             return {
                 "op": "LOG", "action": "validate token", "type": "success",
                 "message": "Token is valid", "booking_id": booking["id"], "room_id": room_id
@@ -678,7 +749,7 @@ class Master:
         else:
             return {
                 "op": "LOG", "action": "validate token", "type": "failure",
-                "reason": "Invalid or expired token for this room", "room_id": room_id
+                "reason": f"Check-in failed: Booking status is {booking['status']}.", "room_id": room_id
             }
 
     # -------------------------
@@ -716,8 +787,8 @@ class Master:
         try:
             request_dict = conn.recv(1024).decode()
             request = json.loads(request_dict)
+            print(f"MASTER | Received request: {request}")
             print(request["op"])
-
             if request["op"] == "REGISTER":
                 response = self.register_user(request)
             elif request["op"] == "LOGIN":

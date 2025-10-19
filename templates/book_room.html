@@ -78,7 +78,7 @@
             </div>
             <div class="col-md-4">
               <label for="starttime" class="form-label">Start Time</label>
-              <input type="datetime-local" id="starttime" name="starttime" class="form-control" required>
+              <input type="datetime-local" id="starttime" name="starttime" class="form-control" required min="{{ min_datetime }}">
             </div>
             <div class="col-md-2">
               <label for="duration" class="form-label">Duration (hours)</label>

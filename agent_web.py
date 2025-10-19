@@ -8,6 +8,7 @@ import json
 from models.room import Room
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify, jsonify
 import socket
 from config import SOCKET_HOST, SOCKET_PORT
@@ -21,6 +22,7 @@ rooms = {}
 
 
 def send_to_master(message):
+    print(f"AGENT_WEB | send_to_master message type: {type(message)}")
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.connect((SOCKET_HOST, SOCKET_PORT))
         s.sendall(message.encode())
@@ -190,7 +192,9 @@ def booking():
      
     session['rooms'] = response['rooms']
     rooms = session.get("rooms", {})
-    return render_template("book_room.html", rooms=rooms)  
+    now = datetime.now(ZoneInfo("Australia/Melbourne"))
+    min_datetime = (now + timedelta(minutes=1)).strftime("%Y-%m-%dT%H:%M")
+    return render_template("book_room.html", rooms=rooms, min_datetime=min_datetime)
 
 @app.route("/my-bookings", methods=["GET"])
 def my_bookings():
@@ -218,27 +222,32 @@ def handle_bookings():
     room_id = request.form.get("room_id")
     action = request.form.get("action")
     if action == "cancel":
+        booking_access_token = request.form.get("booking_access_token")
         msg = {
             "op": "CANCEL_BOOKING",
             "booking_id": booking_id,
-            "token": session["token"]
+            "token": booking_access_token,
         }
         msg = json.dumps(msg)
         response = json.loads(send_to_master(msg))
+
+        print(f"AGENT_WEB | Cancel booking response: {response}")
+
         if response["type"] == "success":
             flash("Booking cancelled successfully.")
-        else:
-            flash("Failed to cancel booking.")
 
     elif action == "check_in":
         booking_access_token = request.form["booking_access_token"]
         room_id = request.form["room_id"]
 
+        print(f"ROOM ID IS {room_id}")
         validation_msg = {
             "op": "VALIDATE_BOOKING_TOKEN",
             "room_id": room_id,
             "booking_access_token": booking_access_token
         }
+
+        print(f"VALIDATION MESSAGE {validation_msg}")
         validation_response = json.loads(send_to_master(json.dumps(validation_msg)))
 
         if validation_response["type"] == "success":

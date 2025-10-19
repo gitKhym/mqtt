@@ -18,12 +18,19 @@ import threading
 
 
 
+from models.status import Status
+
 class RoomPi:
-    STATUS = ["Available", "Occupied", "Maintenance", "Fault"]
-    COLORS = [(0,255,0), (255,255,0), (255,165,0), (255,0,0)]
+    COLORS = {
+        Status.AVAILABLE: (0, 255, 0),
+        Status.OCCUPIED: (255, 255, 0),
+        Status.MAINTENANCE: (255, 165, 0),
+        Status.FAULT: (255, 0, 0),
+        Status.BOOKED: (0, 0, 255)
+    }
 
     def __init__(self):
-        self.current = self.STATUS[0]
+        self.current = Status.AVAILABLE
         self.next_user_token = None
         self.environment_thread = None
         self.id  = None
@@ -31,6 +38,7 @@ class RoomPi:
         self.sense = SenseHat()
         self.running = True
         self.bookings = []
+        self.booking_info = None
         self.registration_payload = None
 
         self.mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
@@ -77,12 +85,12 @@ class RoomPi:
                             print(f"MQTT | Room {self.id} received CANCEL_BOOKING command: {payload}")
                             break
                 elif op == "CHECK_IN":
-                    self.current = self.STATUS[1]  # In Use
+                    self.current = Status.OCCUPIED  # In Use
                     self.next_user_token = token
                     self.update_leds()
                     print(f"MQTT | Room {self.id} received CHECK_IN command: {payload}")
                 elif op == "CHECK_OUT":
-                    self.current = self.STATUS[0]  # Available
+                    self.current = Status.AVAILABLE  # Available
                     self.next_user_token = None
                     self.update_leds()
                     # Remove the booking that was checked out
@@ -91,15 +99,21 @@ class RoomPi:
                             self.bookings.remove(b)
                             break
                     print(f"MQTT | Room {self.id} received CHECK_OUT command: {payload}")
-                elif op == "UPDATE_STATUS": # Add this block
-                    new_status = payload.get("status")
-                    print(f"ROOM {self.id} | Received UPDATE_STATUS command with new_status: {new_status}") # Add this
-                    if new_status in self.STATUS:
+                elif op == "UPDATE_STATUS":
+                    new_status_str = payload.get("status")
+                    print(f"ROOM {self.id} | Received UPDATE_STATUS command with new_status: {new_status_str}") # Add this
+                    try:
+                        new_status = Status(new_status_str)
                         self.current = new_status
+                        if new_status == Status.BOOKED:
+                            self.booking_info = {
+                                "booking_id": payload.get("booking_id"),
+                                "booking_access_token": payload.get("booking_access_token")
+                            }
                         self.update_leds()
-                        print(f"ROOM {self.id} | Status updated to {new_status} via MQTT: {payload}")
-                    else:
-                        print(f"ROOM {self.id} | Received invalid status: {new_status}")
+                        print(f"ROOM {self.id} | Status updated to {new_status.value} via MQTT: {payload}")
+                    except ValueError:
+                        print(f"ROOM {self.id} | Received invalid status: {new_status_str}")
             except Exception as e:
                 print(f"MQTT | Error processing command for room {room_id}: {e}")
         else:
@@ -128,11 +142,10 @@ class RoomPi:
         return ip
 
     def update_leds(self):
-        color = self.COLORS[self.STATUS.index(self.current)]
+        color = self.COLORS[self.current]
         try:
             self.sense.clear(color)
         except Exception:
-            # In case sense hat isn't available (e.g., during testing), ignore errors.
             pass
 
     def insert_booking(self, booking: dict):
@@ -183,7 +196,7 @@ class RoomPi:
                     "temperature": temperature,
                     "humidity": humidity,
                     "pressure": pressure,
-                    "status": status
+                    "status": status.value
                 }
                 self.mqtt_client.publish(config.TOPIC_ROOM_SENSOR_DATA_PREFIX + f"{room_id}/status", json.dumps(mqtt_payload))
             except Exception:
@@ -268,7 +281,7 @@ class RoomPi:
             endtime = datetime.fromisoformat(b["endtime"].isoformat())
             print(starttime, endtime, token, b["token"])
             if b["token"] == token and starttime < now and endtime > now:
-                self.current = self.STATUS[1]  # In Use
+                self.current = Status.OCCUPIED  # In Use
                 self.next_user_token = token
                 self.update_leds()
                 return {"op": "LOG", "action": "check in", "room_id": self.id, "type": "success", "booking_id": msg.get("booking_id"), "token": token}
@@ -278,28 +291,16 @@ class RoomPi:
     def check_out(self, msg: dict):
         token = msg.get("token")
         # Must be the same user currently checked in
-        if token == self.next_user_token:
-            self.current = self.STATUS[0]  # Available
-            self.next_user_token = None
-            self.update_leds()
+        self.current = Status.AVAILABLE  # Available
+        self.next_user_token = None
+        self.update_leds()
 
-            # Find and remove only the first (next) booking with this token
-            for b in self.bookings:
-                if b["token"] == token:
-                    self.bookings.remove(b)
-                    break  # remove only one booking
+        for b in self.bookings:
+            if b["token"] == token:
+                self.bookings.remove(b)
+                break 
 
-            return {"op": "LOG", "action": "check out", "room_id": self.id, "type": "success", "booking_id": msg.get("booking_id"), "token": token}
-
-        # If we reach here, conditions failed
-        return {
-            "op": "LOG",
-            "action": "check out",
-            "room_id": self.id,
-            "type": "failure",
-            "reason": "Invalid token or not checked in"
-    }
-
+        return {"op": "LOG", "action": "check out", "room_id": self.id, "type": "success", "booking_id": msg.get("booking_id"), "token": token}
 
     def handle_user(self, sc: socket.socket):
         """
@@ -401,7 +402,7 @@ class RoomPi:
         msg = {
             "op": "ACTIVATED_ROOM",
             "room_name": room_name,
-            "status": self.current,
+            "status": self.current.value,
             "room_id": self.id,
             "ip": ip,
             "port": port,
