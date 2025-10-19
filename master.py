@@ -383,7 +383,7 @@ class Master:
         bookings = [dict(row) for row in rows]
         return {'op': 'LOG', 'action': 'GET BOOKING LOGS', 'type': 'success', 'bookings': bookings}
     def get_booking_count(self):
-        rows = self.db.conn.execute("SELECT room_id, COUNT(*) AS count FROM bookings GROUP BY room_id").fetchall()
+        rows = self.db.conn.execute("SELECT r.room_name, COUNT(b.id) AS count FROM rooms r LEFT JOIN bookings b ON r.id = b.room_id GROUP BY r.id").fetchall()
         print(rows)
         data = [dict(row) for row in rows]
         return {'op': 'LOG', 'action': 'GET BOOKING COUNT', 'type': 'success', 'data': data}
