@@ -101,6 +101,30 @@ class Master:
     # -------------------------
     # User Login
     # -------------------------
+    def login_admin(self, request):
+        email = request['Email']
+        password = request['Password']
+        try:
+            with self.db_lock:
+                admin_data = self.db. conn.execute("SELECT * FROM users WHERE email=? AND password=? AND role='admin'", (email, password)).fetchone()
+            if admin_data:
+                return {"op": "LOG", 
+                        "action": "log in",
+                        "type": "success",
+                        "user_id" : admin_data["id"]
+                        }
+            else:
+                return {
+                    "op": "LOG", "action": "log in", "type": "failure",
+                    "reason": "Login failed: Wrong credentials"
+                }
+        except Exception as e:
+            return {
+                "op": "LOG", "action": "log in", "type": "failure",
+                "reason": f"Login failed: {e}"
+            }
+
+
     def login_user(self, request: dict):
         email = request["Email"]
         password = request["Password"]
@@ -132,7 +156,115 @@ class Master:
                 "op": "LOG", "action": "log in", "type": "failure",
                 "reason": f"Login failed: {e}"
             }
+    
+    def admin_information(self):
+        try:
+            with self.db_lock:
+                user_count = self.db.conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+                room_count = self.db.conn.execute("SELECT COUNT(*) FROM rooms").fetchone()[0]
+                booking_count = self.db.conn.execute("SELECT COUNT(*) FROM bookings").fetchone()[0]
+                recent_bookings = self.db.conn.execute("SELECT b.*, u.full_name, r.room_name FROM bookings b LEFT JOIN users u ON b.user_id = u.id LEFT JOIN rooms r ON b.room_id = r.id ORDER BY b.start_time DESC LIMIT 5").fetchall()
+                rows = self.db.conn.execute("SELECT * FROM rooms").fetchall()
+                room_statuses = [dict(row) for row in rows]
 
+            return {
+                'op': 'LOG', 'action': 'admin info', 'type': 'success',
+                'user_count':user_count, 'room_count':room_count,
+                'booking_count':booking_count, 'recent_bookings':recent_bookings,
+                'room_statuses':room_statuses
+            }
+        except Exception as e:
+            return {'op': 'LOG', 'action': 'admin info', 'type': 'failure', 'reason': str(e)}
+    
+    def admin_get_users(self):
+        try:
+            with self.db_lock:
+                rows = self.db.conn.execute("SELECT * FROM users").fetchall()
+            users = [dict(row) for row in rows]
+            return {
+                'op': 'LOG', 'action': 'admin get users', 'type': 'success',
+                'users' : users
+            }
+        except Exception as e:
+            return {'op': 'LOG', 'action': 'admin get users', 'type': 'failure', 'reason': str(e)}
+
+    def create_security(self, request):
+        try:
+            name = request['name']
+            email = request['email']
+            password = request['password']
+            passHash = hashlib.sha256(password.encode()).hexdigest()
+            with self.db_lock:
+                new_user = User(email=email, password=password, full_name=name, user_id=email, role='security', user_token=email)
+                user_id = self.db.create_user(new_user) 
+            return {'op': 'LOG', 'action': 'create security', 'type': 'success', 'user_id': user_id}
+        except Exception as e:
+            return {'op': 'LOG', 'action': 'create security', 'type': 'failure', 'reason': str(e)}
+
+    def delete_user(self, request):
+        try:
+            with self.db_lock:
+                self.db.conn.execute("DELETE FROM users WHERE id=?", (request['user_id'],))
+                self.db.conn.commit
+            return {'op': 'LOG', 'action': 'admin get users', 'type': 'success',
+                    'user_id' : request['user_id']}
+        except Exception as e:
+           return {'op': 'LOG', 'action': 'delete user', 'type': 'failure', 'reason': str(e)} 
+
+    def get_user(self, request):
+        with self.db_lock:
+            row = self.db.conn.execute("SELECT * FROM users WHERE id=?", (request['user_id'],)).fetchone()
+            user_req = dict(row)
+        return {'op': 'LOG', 'action': 'get user', 'type': 'success', 'user': user_req }
+
+    def update_user(self, request):
+        with self.db_lock:
+            self.db.conn.execute("UPDATE users SET full_name=?, email=?, role=? WHERE id=?", (request['name'], request['email'], request['role'], request['user_id']))
+        return {'op': 'LOG', 'action': 'update user', 'type': 'success'}
+
+    def admin_get_rooms(self):
+        with self.db_lock:
+            rows = self.db.conn.execute("""
+                SELECT r.id, r.room_name, r.status,
+                    sd.temperature, sd.humidity, sd.pressure, sd.timestamp
+                FROM rooms r
+                LEFT JOIN (
+                    SELECT room_id, temperature, humidity, pressure, timestamp
+                    FROM sensor_data
+                    WHERE (room_id, timestamp) IN (
+                        SELECT room_id, MAX(timestamp)
+                        FROM sensor_data
+                        GROUP BY room_id
+                    )
+                ) sd ON r.id = sd.room_id
+            """).fetchall()
+        rooms = [dict(row) for row in rows]
+        return {'op' : 'LOG' , 'action' : 'ADMIN GET ROOMS','type':'success' ,'rooms' : rooms}
+
+    def get_logs(self):
+        with self.db_lock:
+            rows = self.db.conn.execute("SELECT l.*, u.full_name FROM logs l LEFT JOIN users u ON l.user_id = u.id ORDER BY l.timestamp DESC").fetchall()
+        logs = [dict(row) for row in rows]
+        return {'op': 'LOG', 'action': 'GET LOGS', 'type': 'success', "logs": logs}
+    def get_booking_logs(self):
+        with self.db_lock:
+            rows = self.db.conn.execute("SELECT b.*, u.full_name, r.room_name FROM bookings b LEFT JOIN users u ON b.user_id = u.id LEFT JOIN rooms r ON b.room_id = r.id ORDER BY b.start_time DESC").fetchall()
+        bookings = [dict(row) for row in rows]
+        return {'op': 'LOG', 'action': 'GET BOOKING LOGS', 'type': 'success', 'bookings': bookings}
+    def get_booking_count(self):
+        with self.db_lock:
+            rows = self.db.conn.execute("SELECT room_id, COUNT(*) AS count FROM bookings GROUP BY room_id").fetchall()
+        print(rows)
+        data = [dict(row) for row in rows]
+        return {'op': 'LOG', 'action': 'GET BOOKING COUNT', 'type': 'success', 'data': data}
+
+    def get_sensor_history(self, request):
+        with self.db_lock:
+            rows = self.db.conn.execute(
+                "SELECT timestamp, temperature, humidity, pressure FROM sensor_data WHERE room_id=? ORDER BY timestamp DESC LIMIT 20",
+                (request['room_id'],)
+            ).fetchall()
+        return {'op': 'LOG', 'action': 'GET SENSOR HISTORY', 'type': 'success', 'rows':rows}
     # -------------------------
     # Room Activation
     # -------------------------
@@ -377,6 +509,28 @@ class Master:
                     "op": "LOG", "action": "update rooms",
                     "type": "success", "rooms": self.get_room_inf()
                 }
+            elif request["op"] == "ADMIN_LOGIN":
+                response = self.login_admin(request)
+            elif request['op'] == "ADMIN_DASHBOARD":
+                response = self.admin_information()
+            elif request['op'] == 'GET USERS LIST':
+                response = self.admin_get_users()
+            elif request['op'] == 'CREATE SECURITY':
+                response = self.create_security(request)
+            elif request['op'] == 'DELETE USER':
+                response = self.delete_user(request)
+            elif request['op'] == 'GET USER':
+                response = self.get_user(request)
+            elif request['op'] == 'UPDATE USER':
+                response = self.update_user(request)
+            elif request['op'] == 'ADMIN GET ROOMS':
+                response = self.admin_get_rooms()
+            elif request['op'] == 'GET LOGS':
+                response = self.get_logs()
+            elif request['op'] == 'GET BOOKING LOGS':
+                response = self.get_booking_logs()
+            elif request['op'] == 'GET BOOKING COUNT':
+                response = self.get_booking_count()
             elif request["op"] == "LOG":
                 print(request["action"])
                 if request["type"] == "success" and request["action"] == "booking":
@@ -429,7 +583,9 @@ class Master:
                     "type": "failure",
                     "reason": "Unknown operation"
                 }
+            print(response)
             self.log_create(response)
+            print(response)
             conn.sendall(json.dumps(response).encode())
 
         except Exception as e:
@@ -480,6 +636,6 @@ class Master:
         print("Master server stopped.")
 
 
-if __name__ == "__main__":
+if __name__ == "__main__": 
     master = Master()
     master.start()
