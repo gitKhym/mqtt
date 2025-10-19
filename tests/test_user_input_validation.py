@@ -158,12 +158,23 @@ def test_booking_get_page(client):
 def test_booking_post_success(client):
     login_session(client)
     starttime = (datetime.now() + timedelta(hours=1)).isoformat(timespec='minutes')
-    data = {"room_id": "1", "starttime": starttime, "duration": "2"}
 
-    with patch("agent_web.send_to_room") as mock_room:
-        mock_room.return_value = json.dumps({"type": "success"})
+    data = {
+        "room_id": "1",
+        "starttime": starttime,
+        "duration": "2"
+    }
+
+    mock_master_response = json.dumps({
+        "type": "success",
+        "booking_access_token": "mock_access_token"
+    })
+
+    with patch("agent_web.send_to_master", return_value=mock_master_response):
         resp = client.post("/booking", data=data, follow_redirects=True)
-        assert b"Room booked successfully" in resp.data
+
+    assert b"Room booked successfully" in resp.data
+    assert b"mock_access_token" in resp.data
 
 def test_booking_post_too_long(client):
     login_session(client)
@@ -183,9 +194,24 @@ def test_booking_post_too_long(client):
 def test_booking_post_failure(client):
     login_session(client)
     starttime = (datetime.now() + timedelta(hours=1)).isoformat(timespec='minutes')
-    data = {"room_id": "1", "starttime": starttime, "duration": "1"}
 
-    with patch("agent_web.send_to_room") as mock_room:
-        mock_room.return_value = json.dumps({"type": "failure", "reason": "Room busy"})
+    data = {
+        "room_id": "1",
+        "starttime": starttime,
+        "duration": "1"
+    }
+
+    mock_responses = [
+        json.dumps({"type": "error", "reason": "Room not available"}), 
+        json.dumps({"rooms": {}})  
+    ]
+
+    def mock_send_to_master(msg):
+        return mock_responses.pop(0)
+
+    with patch("agent_web.send_to_master", side_effect=mock_send_to_master):
         resp = client.post("/booking", data=data, follow_redirects=True)
-        assert b"Failed to book the room" in resp.data
+    assert resp.status_code == 200
+    assert b"Failed to book the room" in resp.data
+    assert b"Room not available" in resp.data
+
