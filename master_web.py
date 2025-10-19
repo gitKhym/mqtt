@@ -1,12 +1,16 @@
+import socket
 import sys
+import re
 sys.path.append(".")
 from database import Database
 
 from models.user import User
 from models.room import Room
+from config import SOCKET_HOST, SOCKET_PORT
 
 from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify, send_file
 import os
+import json
 import matplotlib.pyplot as plt
 import io, base64
 from datetime import datetime
@@ -52,6 +56,24 @@ app.secret_key = "supersecretkey"
 DB_FILE = os.path.join(os.path.dirname(__file__), "database.db")
 db = Database(DB_FILE)
 
+def send_to_master(message):
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.connect((SOCKET_HOST, SOCKET_PORT))
+        s.sendall(message.encode())
+        response = s.recv(4096).decode()
+        return response
+
+def send_to_room(ip, port, message):
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        try:
+            s.connect((ip, port))
+            s.sendall(message.encode())
+            response = s.recv(4096).decode()
+            return response
+        except Exception as e:
+            print(f"Error connecting to room at {ip}:{port} - {e}")
+            return None
+
 @app.template_filter('datetimeformat')
 def datetimeformat(value):
     if not value:
@@ -78,14 +100,18 @@ def login():
     if request.method == "POST":
         email = request.form["email"]
         password = request.form["password"]
-        conn = db.conn
-        user = conn.execute("SELECT * FROM users WHERE email=? AND password=? AND role='admin'", (email, password)).fetchone()
-        if user:
-            session["admin"] = email
-            flash("Login successful!")
+        if not email or not password:
+            flash("Email and password are required")
+            return redirect(url_for("/"))
+        msg_json = {"op": "ADMIN_LOGIN", "Email": email, "Password": password}
+        msg = json.dumps(msg_json)
+        response = json.loads(send_to_master(msg))
+        if response['type'] == 'success':
+            session['admin'] = email
+            flash('Log in succesful')
             return redirect(url_for("dashboard"))
         else:
-            flash("Invalid credentials.")
+            flash(response['reason'])
     return render_template("admin-login.html")
 
 @app.route("/logout")
@@ -99,13 +125,15 @@ def logout():
 def dashboard():
     if "admin" not in session:
         return redirect(url_for("login"))
-    conn = db.conn
-    user_count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
-    room_count = conn.execute("SELECT COUNT(*) FROM rooms").fetchone()[0]
-    booking_count = conn.execute("SELECT COUNT(*) FROM bookings").fetchone()[0]
-    recent_bookings = conn.execute("SELECT b.*, u.full_name, r.room_name FROM bookings b LEFT JOIN users u ON b.user_id = u.id LEFT JOIN rooms r ON b.room_id = r.id ORDER BY b.start_time DESC LIMIT 5").fetchall()
-    room_statuses = conn.execute("SELECT * FROM rooms").fetchall()
-    return render_template("admin-dashboard.html", user_count=user_count, room_count=room_count, booking_count=booking_count, recent_bookings=recent_bookings, room_statuses=room_statuses)
+    msg_jon = {'op': 'ADMIN_DASHBOARD'} 
+    msg = json.dumps(msg_jon)
+    response = json.loads(send_to_master(msg))
+    print(response)
+    return render_template("admin-dashboard.html", user_count = response['user_count'],
+                            room_count=response['room_count'],
+                            booking_count=response['booking_count'], 
+                            recent_bookings=response['recent_bookings'], 
+                            room_statuses=response['room_statuses'])
 
 
 # ---------- USERS ----------
@@ -113,9 +141,10 @@ def dashboard():
 def manage_users():
     if "admin" not in session:
         return redirect(url_for("login"))
-    conn = db.conn
-    users = conn.execute("SELECT * FROM users").fetchall()
-    return render_template("users.html", users=users)
+    msg_jon = {'op': 'GET USERS LIST'} 
+    msg = json.dumps(msg_jon)
+    response = json.loads(send_to_master(msg))
+    return render_template("users.html", users=response['users'])
 
 @app.route("/create_security", methods=["POST"])
 def create_security():
@@ -124,8 +153,26 @@ def create_security():
     name = request.form["name"]
     email = request.form["email"]
     password = request.form["password"]
-    new_user = User(email=email, password=password, full_name=name, user_id=email, role='security', user_token=email)
-    db.create_user(new_user)
+    if not all([name, email, password]):
+            flash("All fields are required.")
+            return redirect(url_for("manage_users"))
+
+    if not re.match(r"^[A-Za-zÀ-ÿ' -]{2,50}$", name):
+        flash("Full name must contain only letters and be 2-50 characters long.")
+        return redirect(url_for("manage_users"))
+
+    if not re.match(r"^[\w\.-]+@[\w\.-]+\.\w{2,}$", email):
+        flash("Invalid email format.")
+        return redirect(url_for("manage_users"))
+
+    if not re.match(r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).{8,}$", password):
+        flash("Password must be at least 8 characters long and include upper, lower, number, and special character.")
+        return redirect(url_for("manage_users"))
+    # Assuming a dummy user_id for security staff, or generate one if needed
+ 
+    msg_jon = {'op': 'CREATE SECURITY', 'name': name, 'email':email, 'password': password} 
+    msg = json.dumps(msg_jon)
+    response = json.loads(send_to_master(msg))
     flash("Security staff created.")
     return redirect(url_for("manage_users"))
 
@@ -133,9 +180,9 @@ def create_security():
 def delete_user(user_id):
     if "admin" not in session:
         return redirect(url_for("login"))
-    conn = db.conn
-    conn.execute("DELETE FROM users WHERE id=?", (user_id,))
-    conn.commit()
+    msg_jon = {'op': 'DELETE USER', 'user_id':user_id} 
+    msg = json.dumps(msg_jon)
+    response = json.loads(send_to_master(msg))
     flash("User deleted.")
     return redirect(url_for("manage_users"))
 
@@ -143,9 +190,11 @@ def delete_user(user_id):
 def edit_user(user_id):
     if "admin" not in session:
         return redirect(url_for("login"))
-    conn = db.conn
-    user = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
-    return render_template("edit_user.html", user=user)
+    msg_jon = {'op': 'GET USER', 'user_id':user_id} 
+    msg = json.dumps(msg_jon)
+    response = json.loads(send_to_master(msg))
+    print(response)
+    return render_template("edit_user.html", user=response['user'])
 
 @app.route("/update_user/<int:user_id>", methods=["POST"])
 def update_user(user_id):
@@ -154,9 +203,21 @@ def update_user(user_id):
     name = request.form["name"]
     email = request.form["email"]
     role = request.form["role"]
-    conn = db.conn
-    conn.execute("UPDATE users SET full_name=?, email=?, role=? WHERE id=?", (name, email, role, user_id))
-    conn.commit()
+    if not all([name, email, role]):
+            flash("All fields are required.")
+            return redirect(url_for("manage_users"))
+
+    if not re.match(r"^[A-Za-zÀ-ÿ' -]{2,50}$", name):
+        flash("Full name must contain only letters and be 2-50 characters long.")
+        return redirect(url_for("manage_users"))
+
+    if not re.match(r"^[\w\.-]+@[\w\.-]+\.\w{2,}$", email):
+        flash("Invalid email format.")
+        return redirect(url_for("manage_users"))
+
+    msg_jon = {'op': 'UPDATE USER', 'user_id':user_id, 'name' : name, 'email': email, 'role': role} 
+    msg = json.dumps(msg_jon)
+    response = json.loads(send_to_master(msg))
     flash("User updated.")
     return redirect(url_for("manage_users"))
 
@@ -252,18 +313,22 @@ def announcements():
 def logs():
     if "admin" not in session:
         return redirect(url_for("login"))
-    conn = db.conn
-    logs = conn.execute("SELECT l.*, u.full_name FROM logs l LEFT JOIN users u ON l.user_id = u.id ORDER BY l.timestamp DESC").fetchall()
-    return render_template("logs.html", logs=logs)
+
+    msg = {'op': 'GET LOGS'}
+    msg = json.dumps(msg)
+    response = json.loads(send_to_master(msg))
+    print(response['logs'])
+    return render_template("logs.html", logs=response['logs'])
 
 # ---------- BOOKING LOGS ----------
 @app.route("/booking_logs")
 def booking_logs():
     if "admin" not in session:
         return redirect(url_for("login"))
-    conn = db.conn
-    bookings = conn.execute("SELECT b.*, u.full_name, r.room_name FROM bookings b LEFT JOIN users u ON b.user_id = u.id LEFT JOIN rooms r ON b.room_id = r.id ORDER BY b.start_time DESC").fetchall()
-    return render_template("booking_logs.html", bookings=bookings)
+    msg = {'op': 'GET BOOKING LOGS'}
+    msg = json.dumps(msg)
+    response = json.loads(send_to_master(msg))
+    return render_template("booking_logs.html", bookings=response['bookings'])
 
 
 # ---------- REPORTS ----------
@@ -271,9 +336,11 @@ def booking_logs():
 def view_reports():
     if "admin" not in session:
         return redirect(url_for("login"))
-    conn = db.conn
-    data = conn.execute("SELECT r.room_name, COUNT(b.id) AS count FROM rooms r LEFT JOIN bookings b ON r.id = b.room_id GROUP BY r.id").fetchall()
-    
+    msg = {'op': 'GET BOOKING COUNT'}
+    msg = json.dumps(msg)
+    response = json.loads(send_to_master(msg))
+    print(response)
+    data = response['data']
     if not data:
         return render_template("reports.html", plot_data=None)
 
@@ -328,11 +395,10 @@ def download_report():
 def sensor_history(room_id):
     if "admin" not in session:
         return redirect(url_for("login"))
-    conn = db.conn
-    rows = conn.execute(
-        "SELECT timestamp, temperature, humidity, pressure FROM sensor_data WHERE room_id=? ORDER BY timestamp DESC LIMIT 20",
-        (room_id,)
-    ).fetchall()
+    msg = {'op': 'GET SENSOR HISTORY'}
+    msg = json.dumps(msg)
+    response = json.loads(send_to_master(msg))
+    rows = response['rows']
     history = [
         {
             "timestamp": row["timestamp"],

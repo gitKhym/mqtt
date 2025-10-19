@@ -1,7 +1,7 @@
 import os
 
 # MQTT Configuration
-MQTT_IP = "localhost"
+MQTT_IP = "0.0.0.0"
 MQTT_PORT = 1883
 TOPIC_ALL = "classroom/all"
 TOPIC_SECURITY = "classroom/security"

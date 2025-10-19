@@ -16,6 +16,8 @@ from paho.mqtt.reasoncodes import ReasonCode
 from typing import Any, Optional
 import threading
 
+
+
 class RoomPi:
     STATUS = ["Available", "Occupied", "Maintenance", "Fault"]
     COLORS = [(0,255,0), (255,255,0), (255,165,0), (255,0,0)]
@@ -35,6 +37,7 @@ class RoomPi:
         self.mqtt_client.on_connect = self._on_mqtt_connect
         self.mqtt_client.on_message = self._on_mqtt_message
         self.mqtt_subscriber_thread = None
+        
 
     def _on_mqtt_connect(self, client: Client, userdata: Any, flags: ConnectFlags, rc: ReasonCode, properties: Optional[Properties]) -> None:
         if rc == 0:
@@ -395,7 +398,7 @@ class RoomPi:
         print("Starting room pi service")
         ip = self.get_local_ip()
         port = 10000 + self.id
-        self.registration_payload = {
+        msg = {
             "op": "ACTIVATED_ROOM",
             "room_name": room_name,
             "status": self.current,
@@ -405,6 +408,9 @@ class RoomPi:
             "location": location,
             "capacity": capacity
         }
+
+        self.registration_payload = msg
+
         # The master will send booking updates via MQTT to rooms/<room_id>/command
 
         print(self.bookings)
