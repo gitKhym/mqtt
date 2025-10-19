@@ -111,7 +111,7 @@ def login():
             flash('Log in succesful')
             return redirect(url_for("dashboard"))
         else:
-            flash(request['reason'])
+            flash(response['reason'])
     return render_template("admin-login.html")
 
 @app.route("/logout")
