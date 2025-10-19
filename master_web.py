@@ -188,7 +188,6 @@ def rooms():
     now = datetime.now()
 
     for room in rooms_list:
-        # Prioritize manually set status
         if room['status'] in ['Maintenance', 'Fault', 'Occupied']:
             pass
         else:

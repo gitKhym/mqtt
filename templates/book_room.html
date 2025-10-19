@@ -61,6 +61,38 @@
         {% endfor %}
       {% endif %}
     {% endwith %}
+
+    <div class="card shadow-sm mb-4 border-0">
+      <div class="card-body">
+        <h5 class="card-title fw-bold mb-3">Book a Room</h5>
+        <form id="static-booking-form" method="POST" action="/booking">
+          <div class="row g-3">
+            <div class="col-md-4">
+              <label for="room-select" class="form-label">Select Room</label>
+              <select class="form-select" id="room-select" name="room_id" required>
+                <option value="">Choose...</option>
+                {% for room_id, room in rooms.items() %}
+                  <option value="{{ room_id }}">{{ room.room_name }} ({{ room.location }})</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-4">
+              <label for="starttime" class="form-label">Start Time</label>
+              <input type="datetime-local" id="starttime" name="starttime" class="form-control" required>
+            </div>
+            <div class="col-md-2">
+              <label for="duration" class="form-label">Duration (hours)</label>
+              <input type="number" id="duration" name="duration" class="form-control" min="1" max="2" value="1" required>
+            </div>
+            <div class="col-md-2 d-flex align-items-end">
+              <button type="submit" class="btn btn-primary w-100">Book Now</button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <h2 class="mt-4 mb-3">Available Rooms</h2>
     <div id="rooms-container"></div>
   </div>
   <div class="text-center mt-4">

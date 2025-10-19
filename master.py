@@ -150,9 +150,10 @@ class Master:
             if room_id in self.active_rooms:
                 room.update(self.active_rooms[room_id])
 
-            # Prioritize manually set status
-            if room['status'] in ['Maintenance', 'Fault', 'Occupied']:
-                pass
+            # Prioritize manually set status from DB
+            db_status = room['status']
+            if db_status in ['Maintenance', 'Fault', 'Occupied']:
+                room['status'] = db_status
             else:
                 # Check for active bookings at the current time
                 future_booking = self.db.conn.execute("""
@@ -171,7 +172,7 @@ class Master:
                 SELECT b.start_time, b.end_time, u.full_name
                 FROM bookings b
                 JOIN users u ON b.user_id = u.id
-                WHERE b.room_id=? AND b.start_time>=? AND b.start_time<? AND b.end_time>=?
+                WHERE b.room_id=? AND b.start_time>=? AND b.start_time<? AND b.end_time>=? AND b.status <> 'checked out'
                 ORDER BY b.start_time ASC
                 """,
                 (room_id, today, tomorrow, now)
@@ -353,26 +354,24 @@ class Master:
         ).fetchone()["id"]
 
         room_id = request["room_id"]
-        start_time = datetime.fromisoformat(request["starttime"]) # Convert starttime
+        start_time = datetime.fromisoformat(request["starttime"])
         duration_seconds = request["duration"]
-        end_time = start_time + timedelta(seconds=duration_seconds) # Calculate end_time
+        end_time = start_time + timedelta(seconds=duration_seconds)
         token = request["token"]
         booking = Booking(user_id=user_id, room_id=room_id,
                           start_time=start_time, end_time=end_time, token=token)
-        # Check for overlapping bookings
-        print(f"Checking for overlapping bookings for room {room_id} between {start_time} and {end_time}")
+
         overlapping_bookings = self.db.conn.execute(
             """SELECT * FROM bookings 
-            WHERE room_id = ? AND NOT (end_time <= ? OR start_time >= ?)
+            WHERE room_id = ? AND (start_time < ? AND end_time > ?)
             """,
-            (room_id, start_time, end_time)
+            (room_id, end_time, start_time)
         ).fetchall()
 
         if overlapping_bookings:
-            print(f"Found overlapping bookings: {overlapping_bookings}")
             return {
                 "op": "LOG", "action": "booking", "type": "failure",
-                "room_id": room_id, "reason": "Booking failed: Time slot not available"
+                "room_id": room_id, "reason": "Time slot not available"
             }
 
         try:
