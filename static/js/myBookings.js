@@ -20,6 +20,7 @@ function fetchBookings() {
                                         <strong>Start:</strong> ${b.start_time} |
                                         <strong>End:</strong> ${b.end_time} |
                                         <strong>Status:</strong> ${b.status}
+                                        ${b.status === 'Booked' ? `| <strong>Token:</strong> ${b.booking_access_token}` : ''}
                                     </small>
                                 </div>
                             </div>
@@ -29,6 +30,7 @@ function fetchBookings() {
                                     <input type="hidden" name="booking_id" value="${b.booking_id}">
                                     <input type="hidden" name="full_date" value="${b.full_start_time}">
                                     <input type="hidden" name="end_time" value="${b.full_end_time}">
+                                    ${b.status === 'Booked' ? `<input type="hidden" name="booking_access_token" value="${b.booking_access_token}">` : ''}
                                    
                                     ${b.status === 'Booked' ? `
                                         <button name="action" value="check_in" class="btn btn-success btn-sm">Check In</button>

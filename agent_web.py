@@ -178,7 +178,8 @@ def booking():
         msg = json.dumps(booking_request)
         response = json.loads(send_to_master(msg))
         if response["type"] == "success":
-            flash("Room booked successfully.")
+            booking_access_token = response.get("booking_access_token")
+            flash(f"Room booked successfully. Your booking access token is: {booking_access_token}")
             return redirect(url_for("home"))
         else:
             flash(f"Failed to book the room: {response['reason']}")
@@ -230,17 +231,30 @@ def handle_bookings():
             flash("Failed to cancel booking.")
 
     elif action == "check_in":
-        msg = {
-            "op": "CHECK_IN",
-            "booking_id": booking_id,
-            "token": session["token"]
+        booking_access_token = request.form["booking_access_token"]
+        room_id = request.form["room_id"]
+
+        validation_msg = {
+            "op": "VALIDATE_BOOKING_TOKEN",
+            "room_id": room_id,
+            "booking_access_token": booking_access_token
         }
-        
-        response = json.loads(send_to_master(json.dumps(msg)))
-        if response["type"] == "success":
-            flash("Checked in successfully.")
+        validation_response = json.loads(send_to_master(json.dumps(validation_msg)))
+
+        if validation_response["type"] == "success":
+            validated_booking_id = validation_response["booking_id"]
+            msg = {
+                "op": "CHECK_IN",
+                "booking_id": validated_booking_id,
+                "token": session["token"]
+            }
+            response = json.loads(send_to_master(json.dumps(msg)))
+            if response["type"] == "success":
+                flash("Checked in successfully.")
+            else:
+                flash(f"Failed to check in: {response['reason']}")
         else:
-            flash("Failed to check in.")
+            flash(f"Check-in failed: {validation_response['reason']}")
     elif action == "check_out":
         msg = {
             "op": "CHECK_OUT",

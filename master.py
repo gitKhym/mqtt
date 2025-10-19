@@ -14,6 +14,7 @@ from paho.mqtt.reasoncodes import ReasonCode
 import socket, os, datetime, threading, time, json
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+import secrets
 
 class Master:
     def __init__(self):
@@ -357,9 +358,10 @@ class Master:
         start_time = datetime.fromisoformat(request["starttime"])
         duration_seconds = request["duration"]
         end_time = start_time + timedelta(seconds=duration_seconds)
-        token = request["token"]
+        booking_access_token = secrets.token_hex(16)
+
         booking = Booking(user_id=user_id, room_id=room_id,
-                          start_time=start_time, end_time=end_time, token=token)
+                          start_time=start_time, end_time=end_time, token=booking_access_token)
 
         overlapping_bookings = self.db.conn.execute(
             """SELECT * FROM bookings 
@@ -394,7 +396,8 @@ class Master:
             return {
                 "op": "LOG", "action": "booking",
                 "type": "success", "message": "Booking successful",
-                "booking_id": booking_id, "room id": request['room_id']
+                "booking_id": booking_id, "room_id": request['room_id'],
+                "booking_access_token": booking_access_token
             }
         except Exception as e:
             print(f"MASTER | Booking failed: {e}") # Add this
@@ -403,12 +406,17 @@ class Master:
                 "room_id": room_id, "reason": f"Booking failed: {e}"
             }
 
-    def get_bookings(self, token: str):
+    def get_bookings(self, user_token: str):
         try:
-            now = datetime.now().replace(microsecond=0) # Removed ZoneInfo and replace(tzinfo=None)
+            user_id = self.db.conn.execute(
+                "SELECT id FROM users WHERE user_token=?",
+                (user_token,)
+            ).fetchone()["id"]
+
+            now = datetime.now().replace(microsecond=0)
             bookings_data = self.db.conn.execute(
-                "SELECT * FROM bookings WHERE token=? AND end_time > ? ORDER BY start_time ASC",
-                (token, now)
+                "SELECT * FROM bookings WHERE user_id=? AND end_time > ? ORDER BY start_time ASC",
+                (user_id, now)
             ).fetchall()
 
             bookings_list = []
@@ -423,7 +431,8 @@ class Master:
                         "end_time": datetime.fromisoformat(booking["end_time"]).strftime("%H:%M"),
                         "full_start_time": datetime.fromisoformat(booking["start_time"]).strftime("%Y-%m-%dT%H:%M"),
                         "full_end_time": datetime.fromisoformat(booking["end_time"]).strftime("%Y-%m-%dT%H:%M"),
-                        "status": booking["status"]
+                        "status": booking["status"],
+                        "booking_access_token": booking["token"]
                     })
 
             response = {
@@ -526,6 +535,29 @@ class Master:
                 "message": "Booking cancelled successfully", "booking_id": booking_id, "room id": request["room_id"]
             }
 
+    def validate_booking_token(self, request: dict):
+        room_id = request["room_id"]
+        booking_access_token = request["booking_access_token"]
+        now = datetime.now(ZoneInfo("Australia/Melbourne")).replace(tzinfo=None)
+
+        booking = self.db.conn.execute(
+            """SELECT * FROM bookings 
+            WHERE room_id = ? AND token = ? AND start_time <= ? AND end_time > ? AND status = 'Booked'
+            """,
+            (room_id, booking_access_token, now, now)
+        ).fetchone()
+
+        if booking:
+            return {
+                "op": "LOG", "action": "validate token", "type": "success",
+                "message": "Token is valid", "booking_id": booking["id"], "room_id": room_id
+            }
+        else:
+            return {
+                "op": "LOG", "action": "validate token", "type": "failure",
+                "reason": "Invalid or expired token for this room", "room_id": room_id
+            }
+
     # -------------------------
     # Logging Operations
     # -------------------------
@@ -540,19 +572,19 @@ class Master:
                     msg = f"User {log['user_id']} logged in successfully."
                     self.db.create_log(log["user_id"], "log in", msg)
                 elif log["action"] == "room connection":
-                    msg = f"Room {log['room id']} connected successfully."
+                    msg = f"Room {log['room_id']} connected successfully."
                     self.db.create_log(None, "room connection", msg)
                 elif log["action"] == "check in":
-                    msg = f"User checked in to room {log['room id']} successfully."
+                    msg = f"User checked in to room {log['room_id']} successfully."
                     self.db.create_log(None, "check in", msg)
                 elif log["action"] == "check out":
-                    msg = f"User checked out of room {log['room id']} successfully."
+                    msg = f"User checked out of room {log['room_id']} successfully."
                     self.db.create_log(None, "check out", msg)
                 elif log["action"] == "booking":
-                    msg = f"Room {log['room id']} booked successfully."
+                    msg = f"Room {log['room_id']} booked successfully."
                     self.db.create_log(None, "booking", msg)
                 elif log["action"]== "cancel booking":
-                    msg = f"Booking {log['booking_id']} on room {log['room id']} has been canceled"
+                    msg = f"Booking {log['booking_id']} on room {log['room_id']} has been canceled"
                     self.db.create_log(None, "cancel booking", msg)
             elif log["type"] == "failure":
                 self.db.create_log(None, log["action"], log["reason"])
@@ -587,6 +619,8 @@ class Master:
             elif request["op"] == "GET_ROOMS":
                 rooms_data = self.get_room_inf()
                 response = {"op": "GET_ROOMS", "type": "success", "rooms": rooms_data}
+            elif request["op"] == "VALIDATE_BOOKING_TOKEN":
+                response = self.validate_booking_token(request)
             else:
                 response = {
                     "op": request.get("op"),
