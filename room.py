@@ -185,33 +185,20 @@ class RoomPi:
         {
             "op":"BOOK_ROOM",
             "starttime":"2025-10-15T19:00:00",
-            "duration":3600,
+            "endtime ": ,
             "token":"abc"
         }
         """
         try:
             starttime = datetime.fromisoformat(msg["starttime"])
-            duration_sec = int(msg["duration"])
-            endtime = starttime + timedelta(seconds=duration_sec)
+            endtime = datetime.fromisoformat(msg["endtime"])
             token = msg["token"]
             print(starttime, endtime)
         except Exception as e:
             return {"op": "LOG", "action": "booking", "room_id": self.id,
                     "type": "failure", "reason": f"bad payload: {e}"}
 
-        now = datetime.now(ZoneInfo("Australia/Melbourne")).replace(tzinfo=None)
-        if starttime < now:
-            return {"op": "LOG", "action": "booking", "room_id": self.id,
-                    "type": "failure", "reason": "Cannot book for past time"}
-
         with self.lock:
-            # Check for overlap
-            
-            for b in self.bookings:
-                print(b["starttime"], b["endtime"])
-                if starttime < b["endtime"] and endtime > b["starttime"]:
-                    return {"op": "LOG", "action": "booking", "room_id": self.id,
-                            "type": "failure", "reason": "Time slot already booked"}
 
             booking_entry = {"starttime": starttime, "endtime": endtime, "token": token}
             self.insert_booking(booking_entry)
