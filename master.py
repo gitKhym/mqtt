@@ -731,13 +731,13 @@ class Master:
             if now < start_time:
                 return {
                     "op": "LOG", "action": "validate token", "type": "failure",
-                    "reason": "Check-in failed: Check-in is not yet available for this booking."
+                    "reason": "Check-in is not yet available for this booking."
                 }
             # now >= end_time
             else:
                 return {
                     "op": "LOG", "action": "validate token", "type": "failure",
-                    "reason": "Check-in failed: This booking has expired."
+                    "reason": "This booking has expired."
                 }
         
         # If all checks pass, and status is BOOKED, then it's valid
@@ -749,7 +749,7 @@ class Master:
         else:
             return {
                 "op": "LOG", "action": "validate token", "type": "failure",
-                "reason": f"Check-in failed: Booking status is {booking['status']}.", "room_id": room_id
+                "reason": f"Booking status is {booking['status']}.", "room_id": room_id
             }
 
     # -------------------------

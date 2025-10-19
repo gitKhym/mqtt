@@ -260,8 +260,6 @@ def handle_bookings():
             response = json.loads(send_to_master(json.dumps(msg)))
             if response["type"] == "success":
                 flash("Checked in successfully.")
-            else:
-                flash(f"Failed to check in: {response['reason']}")
         else:
             flash(f"Check-in failed: {validation_response['reason']}")
     elif action == "check_out":
@@ -273,8 +271,6 @@ def handle_bookings():
         response = json.loads(send_to_master(json.dumps(msg)))
         if response["type"] == "success":
             flash("Checked out successfully.")
-        else:
-            flash("Failed to check out.")
 
     return redirect(url_for("home"))
 

@@ -6,6 +6,6 @@ class Status(Enum):
     MAINTENANCE = "Maintenance"
     FAULT = "Fault"
     BOOKED = "Booked"
-    CHECKED_IN = "Checked in"
-    CHECKED_OUT = "Checked out"
+    CHECKED_IN = "checked in"
+    CHECKED_OUT = "checked out"
     CANCELLED = "Cancelled"
