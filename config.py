@@ -1,7 +1,7 @@
 import os
 
 # MQTT Configuration
-MQTT_IP = "192.168.1.128"
+MQTT_IP = "0.0.0.0"# Server's IP
 MQTT_PORT = 1883
 TOPIC_ALL = "classroom/all"
 TOPIC_SECURITY = "classroom/security"
@@ -11,7 +11,7 @@ TOPIC_ANNOUNCEMENTS = "announcements"
 TOPIC_ROOM_REGISTER = "rooms/register"
 
 # Socket Configuration
-SOCKET_HOST = "192.168.1.128"
+SOCKET_HOST = "0.0.0.0" # Server's IP
 SOCKET_PORT = 12345
 
 # TODO: Database Configuration 
