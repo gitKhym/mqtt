@@ -23,6 +23,21 @@ The division of work has been progresive everybody has been asigning task to the
 
 There are some parts of the project that have not been implemented and we are really ashamed for that.
 
+## Instructions
+
+1. Clone the repository on each PI. Edit each PI's config such that
+   `MQTT_IP = {Ip of the PI you're running master.py on}`
+   `SOCKET_HOST = {Ip of the PI you're running master.py on}`
+
+2. Run `python database.py` on the Master Pi.
+3. Run `master.py` and `master_web.py` on the Master Pi
+4. Run `agent.py` and `agent_web.py` on an Agent Pi
+5. Run `room.py {id} "{room name}" "{location}" {capacity}` on a Room Pi to register that Pi as a single room
+
+You can access the admin web page on `{master ip}:8001`, credentials are email: `admin@test.com` pass: `admin`
+
+You can access the agent web page through its local network `localhost:7001`, credentials are email: `student1@test.com` or `student2@test.com` pass: `student`
+
 ## System architecture
 
 ## Challenges encountered
@@ -62,8 +77,7 @@ The system involves a central **Master Pi** coordinating multiple **Agent Pis** 
     - **Master Interaction:** Communicates exclusively with the Master Pi using Socket Programming for all backend operations, acting as a client.
 
 3.  **Room Pi (`room.py`):**
-    - **Classroom Interface:** Dedicated to a single classroom, functioning as a display terminal and sensor hub. It does not support direct user interaction.
-    - **Real-time Display:** Presents information including its status (Available, In Use, Maintenance, Fault), upcoming booking schedules, and environmental sensor data (temperature, humidity, pressure).
+    - **Classroom Interface:** Dedicated to a single classroom, functioning as a display terminal and sensor hub.
     - **MQTT Integration:** Publishes sensor data and status updates to the Master Pi via MQTT and subscribes to commands from the Master Pi.
 
 ### Communication Layer:
