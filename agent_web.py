@@ -159,10 +159,27 @@ def booking():
         return redirect(url_for("login"))
 
     if request.method == "POST":
+        if session.get("user_role") == "Security" and "room_id" in request.form and "new_status" in request.form:
+            room_id = request.form["room_id"]
+            new_status = request.form["new_status"]
+            msg = {
+                "op": "UPDATE_ROOM_STATUS",
+                "room_id": room_id,
+                "status": new_status,
+                "token": session["token"]
+            }
+            response = json.loads(send_to_master(json.dumps(msg)))
+
+            if response["type"] == "success":
+                flash(f"Room {room_id} status updated to {new_status}.")
+            else:
+                flash(f"Failed to update room status: {response['reason']}")
+            return redirect(url_for("booking"))
+
+        # Existing booking logic for regular users
         room_id = request.form["room_id"]
         starttime_str = request.form["starttime"]
         duration_hours = int(request.form["duration"])
-
         if duration_hours > 2:
             flash("You can only book a room for 2h max")
             return redirect(url_for("booking"))
@@ -272,6 +289,20 @@ def handle_bookings():
         if response["type"] == "success":
             flash("Checked out successfully.")
 
+    elif action == "update_booking_status":
+        new_booking_status = request.form["new_booking_status"]
+        msg = {
+            "op": "UPDATE_BOOKING_STATUS",
+            "booking_id": booking_id,
+            "status": new_booking_status,
+            "token": session["token"]
+        }
+        response = json.loads(send_to_master(json.dumps(msg)))
+        if response["type"] == "success":
+            flash(f"Booking {booking_id} status updated to {new_booking_status}.")
+        else:
+            flash(f"Failed to update booking status: {response['reason']}")
+
     return redirect(url_for("home"))
 
 
@@ -287,9 +318,11 @@ def api_rooms():
     try:
         response = json.loads(response_str)
         if response.get("type") == "success":
-            return jsonify(response.get("rooms", {}))
+            rooms_data = response.get("rooms", {})
+            user_role = session.get("user_role")
+            return jsonify({"rooms": rooms_data, "user_role": user_role})
         else:
-            return jsonify({"error": "Failed to retrieve rooms", "details": response.get("reason")}), 500
+            return jsonify({"error": "Failed to retrieve rooms", "details": response.get('reason')}), 500
     except (json.JSONDecodeError, AttributeError):
         return jsonify({"error": "Invalid response from master"}), 500
 
@@ -306,7 +339,9 @@ def api_my_bookings():
     try:
         response = json.loads(response_str)
         if response.get("type") == "success":
-            return jsonify(response.get("bookings", []))
+            bookings_data = response.get("bookings", [])
+            user_role = session.get("user_role")
+            return jsonify({"bookings": bookings_data, "user_role": user_role})
         else:
             return jsonify({"error": "Failed to retrieve bookings", "details": response.get("reason")}), 500
     except (json.JSONDecodeError, AttributeError):

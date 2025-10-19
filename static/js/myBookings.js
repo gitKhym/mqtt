@@ -6,7 +6,9 @@ function fetchBookings() {
             }
             return response.json();
         })
-        .then(bookings => {
+        .then(data => {
+            const bookings = data.bookings;
+            const userRole = data.user_role;
             const container = document.getElementById('bookings-container');
             if (bookings && bookings.length > 0) {
                 container.innerHTML = bookings.map(b => `
@@ -38,6 +40,17 @@ function fetchBookings() {
                                     ` : ''}
                                     ${b.status === 'checked in' ? `
                                         <button name="action" value="check_out" class="btn btn-primary btn-sm">Check Out</button>
+                                    ` : ''}
+                                    ${userRole === 'Security' ? `
+                                        <div class="mt-2">
+                                            <label for="booking-status-select-${b.booking_id}" class="form-label me-2 mb-0">Change Booking Status:</label>
+                                            <select class="form-select form-select-sm" id="booking-status-select-${b.booking_id}" name="new_booking_status" onchange="this.form.submit()">
+                                                <option value="Booked" ${b.status === "Booked" ? "selected" : ""}>Booked</option>
+                                                <option value="Checked In" ${b.status === "Checked In" ? "selected" : ""}>Checked In</option>
+                                                <option value="Cancelled" ${b.status === "Cancelled" ? "selected" : ""}>Cancelled</option>
+                                            </select>
+                                            <input type="hidden" name="action" value="update_booking_status">
+                                        </div>
                                     ` : ''}
                                 </form>
                             </div>

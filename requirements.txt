@@ -3,3 +3,4 @@ flask
 matplotlib
 pytest
 pytest-cov
+sense_hat

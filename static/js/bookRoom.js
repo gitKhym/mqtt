@@ -1,7 +1,9 @@
 function fetchRooms() {
   fetch("/api/rooms")
     .then((response) => response.json())
-    .then((rooms) => {
+    .then((data) => {
+      const rooms = data.rooms;
+      const userRole = data.user_role;
       const container = document.getElementById("rooms-container");
       const existingRoomCards = new Set();
 
@@ -56,6 +58,24 @@ function fetchRooms() {
                 ? "bg-danger-subtle text-danger-emphasis"
                 : "bg-secondary-subtle text-secondary-emphasis";
 
+        let securityDropdownHtml = '';
+        if (userRole === "Security") {
+            securityDropdownHtml = `
+                <div class="mt-3">
+                    <form action="/booking" method="POST" class="d-flex align-items-center">
+                        <input type="hidden" name="room_id" value="${room_id}">
+                        <label for="status-select-${room_id}" class="form-label me-2 mb-0">Change Status:</label>
+                        <select class="form-select form-select-sm" id="status-select-${room_id}" name="new_status" onchange="this.form.submit()">
+                            <option value="Available" ${room.status === "Available" ? "selected" : ""}>Available</option>
+                            <option value="In Use" ${room.status === "In Use" ? "selected" : ""}>In Use</option>
+                            <option value="Maintenance" ${room.status === "Maintenance" ? "selected" : ""}>Maintenance</option>
+                            <option value="Fault" ${room.status === "Fault" ? "selected" : ""}>Fault</option>
+                        </select>
+                    </form>
+                </div>
+            `;
+        }
+
         roomCard.innerHTML = `
                     <div class="card-body">
                         <div class="d-flex justify-content-between align-items-center mb-2">
@@ -67,6 +87,8 @@ function fetchRooms() {
                             </div>
                             <span class="badge fs-6 ${statusClass}">${room.status}</span>
                         </div>
+
+                        ${securityDropdownHtml}
 
                         <div class="d-flex justify-content-around text-center my-3 border-top border-bottom py-3">
                             <div>

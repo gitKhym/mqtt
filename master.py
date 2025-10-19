@@ -837,6 +837,9 @@ class Master:
                 response = {"op": "GET_ROOMS", "type": "success", "rooms": rooms_data}
             elif request["op"] == "VALIDATE_BOOKING_TOKEN":
                 response = self.validate_booking_token(request)
+            elif request["op"] == "GET_ALL_ROOM_STATUSES":
+                rooms_data = self.get_room_inf()
+                response = {"op": "GET_ALL_ROOM_STATUSES", "type": "success", "rooms": rooms_data}
             else:
                 response = {
                     "op": request.get("op"),
