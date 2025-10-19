@@ -78,10 +78,7 @@ function fetchRooms() {
                               <input type="number" id="duration_${room_id}" name="duration" class="form-control" min="1" max="4" required>
                             </div>
                             <div class="col-md-2 d-flex align-items-end">
-                              ${room.status === 'Available' ? 
-                                `<button type="submit" class="btn btn-primary w-100">Book</button>` : 
-                                `<button type="button" class="btn btn-secondary w-100" disabled>Unavailable</button>`
-                              }
+                              <button type="submit" class="btn btn-primary w-100">Book</button>
                             </div>
                           </div>
                         </form>

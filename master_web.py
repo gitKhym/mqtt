@@ -5,7 +5,7 @@ from database import Database
 from models.user import User
 from models.room import Room
 
-from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify
+from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify, send_file
 import os
 import matplotlib.pyplot as plt
 import io, base64
@@ -268,17 +268,17 @@ def booking_logs():
 
 
 # ---------- REPORTS ----------
-@app.route("/reports")
-def reports():
+@app.route("/view_reports")
+def view_reports():
     if "admin" not in session:
         return redirect(url_for("login"))
     conn = db.conn
-    data = conn.execute("SELECT room_id, COUNT(*) AS count FROM bookings GROUP BY room_id").fetchall()
+    data = conn.execute("SELECT r.room_name, COUNT(b.id) AS count FROM rooms r LEFT JOIN bookings b ON r.id = b.room_id GROUP BY r.id").fetchall()
     
     if not data:
         return render_template("reports.html", plot_data=None)
 
-    rooms = [f"Room {r['room_id']}" for r in data]
+    rooms = [r['room_name'] for r in data]
     counts = [r["count"] for r in data]
     
     plt.figure(figsize=(10, 5))
@@ -295,6 +295,34 @@ def reports():
     plot_data = base64.b64encode(buf.getvalue()).decode()
     
     return render_template("reports.html", plot_data=plot_data)
+
+@app.route("/admin/download_report")
+def download_report():
+    if "admin" not in session:
+        return redirect(url_for("login"))
+    conn = db.conn
+    data = conn.execute("SELECT r.room_name, COUNT(b.id) AS count FROM rooms r LEFT JOIN bookings b ON r.id = b.room_id GROUP BY r.id").fetchall()
+    
+    if not data:
+        flash("No booking data available to generate a report.")
+        return redirect(url_for("view_reports"))
+
+    rooms = [r['room_name'] for r in data]
+    counts = [r["count"] for r in data]
+    
+    plt.figure(figsize=(10, 5))
+    plt.bar(rooms, counts)
+    plt.title("Room Usage Frequency")
+    plt.xlabel("Room")
+    plt.ylabel("Number of Bookings")
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+
+    buf = io.BytesIO()
+    plt.savefig(buf, format="png")
+    buf.seek(0)
+    
+    return send_file(buf, mimetype='image/png', as_attachment=True, download_name='room_usage_report.png')
 
 # ---------- SENSOR HISTORY ----------
 @app.route("/sensor_history/<int:room_id>")

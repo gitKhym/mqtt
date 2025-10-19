@@ -168,7 +168,6 @@ def booking():
         # Convert and compute endtime
         starttime = datetime.fromisoformat(starttime_str)
 
-
         booking_request = {
             "op": "BOOK_ROOM",
             "room_id": room_id,
@@ -176,19 +175,14 @@ def booking():
             "duration": duration_hours * 3600,  
             "token": session["token"]
         }
-        # room_ip = session["rooms"][f"{room_id}"]["ip"]
-        # print(room_ip)
-        # room_port = session["rooms"][f"{room_id}"]["port"]
-        # print(room_port)
         msg = json.dumps(booking_request)
-        print(msg)
-        response = json.loads(send_to_room(room_ip,room_port,msg))
+        response = json.loads(send_to_master(msg))
         if response["type"] == "success":
             flash("Room booked successfully.")
+            return redirect(url_for("home"))
         else:
-            flash("Failed to book the room." + response["reason"])
-
-        return redirect(url_for("home"))
+            flash(f"Failed to book the room: {response['reason']}")
+            return redirect(url_for("booking"))
      
     msg = {"op": "UPDATE_ROOMS"}  
     response = json.loads(send_to_master(json.dumps(msg)))
@@ -221,23 +215,15 @@ def handle_bookings():
         return redirect(url_for("login"))
     booking_id = request.form.get("booking_id")
     room_id = request.form.get("room_id")
-    full_date = request.form.get("full_date")
-    end_time = request.form.get("end_time")
-    full_date = datetime.strptime(full_date, "%Y-%m-%dT%H:%M").isoformat()
-    room_ip = session["rooms"][f"{room_id}"]["ip"]
-    room_port = session["rooms"][f"{room_id}"]["port"]
     action = request.form.get("action")
-    print(full_date)
     if action == "cancel":
         msg = {
             "op": "CANCEL_BOOKING",
             "booking_id": booking_id,
-            "starttime": full_date,
             "token": session["token"]
         }
         msg = json.dumps(msg)
-        print(msg)
-        response = json.loads(send_to_master(msg)) # Changed to send_to_master
+        response = json.loads(send_to_master(msg))
         if response["type"] == "success":
             flash("Booking cancelled successfully.")
         else:
@@ -247,12 +233,10 @@ def handle_bookings():
         msg = {
             "op": "CHECK_IN",
             "booking_id": booking_id,
-            "starttime": full_date,
-            "endtime": end_time,
             "token": session["token"]
         }
         
-        response = json.loads(send_to_master(json.dumps(msg))) # Changed to send_to_master
+        response = json.loads(send_to_master(json.dumps(msg)))
         if response["type"] == "success":
             flash("Checked in successfully.")
         else:
@@ -261,10 +245,9 @@ def handle_bookings():
         msg = {
             "op": "CHECK_OUT",
             "booking_id": booking_id,
-            "starttime": full_date,
             "token": session["token"]
         }
-        response = json.loads(send_to_master(json.dumps(msg))) # Changed to send_to_master
+        response = json.loads(send_to_master(json.dumps(msg)))
         if response["type"] == "success":
             flash("Checked out successfully.")
         else:
