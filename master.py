@@ -1,15 +1,4 @@
 
-from zoneinfo import ZoneInfo
-from datetime import timedelta
-from datetime import datetime
-import sys
-import os
-import socket
-import json
-import hashlib
-import threading
-import binascii
-import time
 from typing import Optional, Tuple, Any
 
 from database import Database
@@ -18,71 +7,221 @@ from models.room import Room
 from models.booking import Booking
 import config
 
+from paho.mqtt.client import Client, MQTTMessage, ConnectFlags
+from paho.mqtt.properties import Properties
+import paho.mqtt.client as mqtt
+from paho.mqtt.reasoncodes import ReasonCode
+import socket, os, datetime, threading, time, json
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+import secrets
 
 class Master:
     def __init__(self):
         self.running = True
         self.socket_server_thread = None
+        self.mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+        self.mqtt_client.on_connect = self._on_mqtt_connect
+        self.mqtt_client.on_message = self._on_mqtt_message
+        self.mqtt_subscriber_thread = None
         self.active_rooms = {}
 
-        # === Mutex Locks ===
-        self.db_lock = threading.RLock()       # Protects all database access
-        self.rooms_lock = threading.RLock()    # Protects self.active_rooms
 
         DB_FILE = os.path.join('database.db')
         self.db = Database(DB_FILE)
+
+    def _on_mqtt_connect(self, client: Client, userdata: Any, flags: ConnectFlags, rc: ReasonCode, properties: Optional[Properties]) -> None:
+        if rc == 0:
+            print(f"MQTT | Master connected to MQTT")
+            client.subscribe(config.TOPIC_ROOM_SENSOR_DATA_PREFIX + "+/status")
+            client.subscribe(config.TOPIC_ROOM_REGISTER)
+            print(f"MQTT | Master subscribed to topic: {config.TOPIC_ROOM_SENSOR_DATA_PREFIX}+/status")
+            print(f"MQTT | Master subscribed to topic: {config.TOPIC_ROOM_REGISTER}")
+        else:
+            print(f"MQTT | Master failed to connect to MQTT")
+
+    def _on_mqtt_message(self, client: Client, userdata: Any, msg: MQTTMessage):
+        topic_parts = msg.topic.split('/')
+        if len(topic_parts) == 3 and topic_parts[0] == 'rooms' and topic_parts[2] == 'status':
+            room_id = topic_parts[1]
+            try:
+                payload = json.loads(msg.payload.decode())
+                temperature = payload.get("temperature")
+                humidity = payload.get("humidity")
+                pressure = payload.get("pressure")
+                status = payload.get("status")
+                timestamp = datetime.fromisoformat(payload.get("timestamp"))
+
+                # Update room status in DB
+                self.db.conn.execute(
+                    "UPDATE rooms SET status = ? WHERE id = ?",
+                    (status, room_id)
+                )
+
+                # Insert sensor data
+                self.db.conn.execute(
+                    "INSERT INTO sensor_data (room_id, timestamp, temperature, humidity, pressure) VALUES (?, ?, ?, ?, ?)",
+                    (room_id, timestamp, temperature, humidity, pressure)
+                )
+
+                self.db.conn.commit()
+                if room_id in self.active_rooms:
+                    self.active_rooms[room_id]['status'] = status
+                print(f"MQTT | Received sensor data for room {room_id}: {payload}")
+            except Exception as e:
+                print(f"MQTT | Error processing sensor data for room {room_id}: {e}")
+        elif msg.topic == config.TOPIC_ROOM_REGISTER:
+            try:
+                payload = json.loads(msg.payload.decode())
+                room_id = payload.get("room_id")
+                room_name = payload.get("room_name")
+                room_ip = payload.get("ip")
+                room_port = payload.get("port")
+                location = payload.get("location")
+                capacity = payload.get("capacity")
+                status = payload.get("status")
+
+                bookings_list = {}
+                room_data = self.db.conn.execute(
+                    "SELECT * FROM rooms WHERE id=?",
+                    (room_id,)
+                ).fetchone()
+
+                if not room_data:
+                    new_room = Room(room_name, location, capacity, status="Available")
+                    self.db.create_room(new_room)
+                else:
+                    self.db.conn.execute(
+                        "UPDATE rooms SET room_name = ?, location = ?, capacity = ? WHERE id = ?",
+                        (room_name, location, capacity, room_id)
+                    )
+                    self.db.conn.commit()
+                    room_bookings = self.db.conn.execute(
+                        "SELECT * FROM bookings WHERE room_id=?",
+                        (room_id,)
+                    ).fetchall()
+                    for booking in room_bookings:
+                        bookings_list[f"booking_{booking['start_time']}"] = {
+                            "start_time": booking["start_time"],
+                            "end_time": booking["end_time"],
+                            "token": booking["token"]
+                        }
+
+                self.active_rooms[room_id] = {
+                    "id": room_id,
+                    "room_name": room_name,
+                    "ip": room_ip,
+                    "port": room_port,
+                    "status": status,
+                    "location": location,
+                    "capacity": capacity
+                }
+                print(f"MQTT | Room {room_id} registered: {payload}")
+            except Exception as e:
+                print(f"MQTT | Error processing room registration: {e}")
+        else:
+            print(f"MQTT | Received message on unexpected topic: {msg.topic}")
+
+    def _mqtt_subscriber_thread(self):
+        try:
+            self.mqtt_client.connect(config.MQTT_IP, config.MQTT_PORT, 60)
+            self.mqtt_client.loop_forever()
+        except Exception as e:
+            print(f"MQTT | Error in MQTT subscriber thread: {e}")
+        finally:
+            self.mqtt_client.disconnect()
+            print("MQTT | Master MQTT subscriber stopped.")
 
     # -------------------------
     # User Registration
     # -------------------------
 
     def get_room_inf(self):
-        with self.rooms_lock:
-            active_rooms_copy = dict(self.active_rooms)
+        # Get all rooms from the database as the source of truth
+        all_rooms_from_db = self.db.conn.execute("SELECT * FROM rooms").fetchall()
+        
+        # Use a dictionary for easy lookup and modification
+        rooms_map = {room['id']: dict(room) for room in all_rooms_from_db}
+
         today = datetime.now(ZoneInfo("Australia/Melbourne")).replace(tzinfo=None).replace(hour=0, minute=0, second=0, microsecond=0)
         tomorrow = today + timedelta(days=1)
         now = datetime.now(ZoneInfo("Australia/Melbourne")).replace(tzinfo=None)
-        for room in active_rooms_copy.values():
-            with self.db_lock:
-                room_id_getter = self.db.conn.execute(
-                    "SELECT id FROM rooms WHERE room_name=?",
-                    (room["room_name"],)
-                ).fetchone()["id"]
-                
-                room_bookings = self.db.conn.execute(
-                    """
-                    SELECT start_time, end_time 
-                    FROM bookings 
-                    WHERE room_id=? AND start_time>=? AND start_time<? AND end_time>=? AND status <> 'checked out'
-                    ORDER BY start_time ASC
-                    """,
-                    (room_id_getter, today, tomorrow, now)
-                ).fetchall()
+
+        for room_id, room in rooms_map.items():
+            if room_id in self.active_rooms:
+                room.update(self.active_rooms[room_id])
+
+            # Prioritize manually set status from DB
+            db_status = room['status']
+            if db_status in ['Maintenance', 'Fault', 'Occupied']:
+                room['status'] = db_status
+            else:
+                # Check for active bookings at the current time
+                future_booking = self.db.conn.execute("""
+                    SELECT 1 FROM bookings 
+                    WHERE room_id = ? AND start_time <= ? AND end_time > ? AND status IN ('Booked', 'checked in')
+                    LIMIT 1
+                """, (room_id, now, now)).fetchone()
+
+                if future_booking:
+                    room['status'] = 'Booked'
+                else:
+                    room['status'] = 'Available'
+
+            room_bookings = self.db.conn.execute(
+                """
+                SELECT b.start_time, b.end_time, u.full_name
+                FROM bookings b
+                JOIN users u ON b.user_id = u.id
+                WHERE b.room_id=? AND b.start_time>=? AND b.start_time<? AND b.end_time>=? AND b.status <> 'checked out'
+                ORDER BY b.start_time ASC
+                """,
+                (room_id, today, tomorrow, now)
+            ).fetchall()
+
+            latest_sensor_data = self.db.conn.execute(
+                """
+                SELECT temperature, humidity, pressure
+                FROM sensor_data
+                WHERE room_id = ?
+                ORDER BY timestamp DESC
+                LIMIT 1
+                """,
+                (room_id,)
+            ).fetchone()
 
             room["bookings"] = [
                 {
                     "start_time": datetime.fromisoformat(booking["start_time"]).strftime("%H:%M"),
                     "end_time": datetime.fromisoformat(booking["end_time"]).strftime("%H:%M"),
+                    "full_name": booking["full_name"],
                 }
                 for booking in room_bookings
             ]
 
-        return active_rooms_copy
+            if latest_sensor_data:
+                room["temperature"] = f"{latest_sensor_data['temperature']:.1f}"
+                room["humidity"] = f"{latest_sensor_data['humidity']:.1f}"
+                room["pressure"] = f"{latest_sensor_data['pressure']:.1f}"
+            else:
+                room["temperature"] = "N/A"
+                room["humidity"] = "N/A"
+                room["pressure"] = "N/A"
+
+        return rooms_map
         
     def register_user(self, request: dict):
         full_name = request["Full_Name"]
         password = request["Password"]
-        pw_hash = hashlib.sha256(password.encode()).hexdigest()
         email = request["Email"]
         unique_id = request["Unique_ID"]
         token = str(binascii.hexlify(os.urandom(20)).decode())
         role = "user"
-        user = User(email=email, password=pw_hash, full_name=full_name,
+        user = User(email=email, password=password, full_name=full_name,
                     user_id=unique_id, user_token=token, role=role)
 
         try:
-            with self.db_lock:
-                userId = self.db.create_user(user)
+            userId = self.db.create_user(user)
             active_rooms_copy = self.get_room_inf()
             return {
                 "op": "LOG", "action": "register", "type": "success",
@@ -128,13 +267,11 @@ class Master:
     def login_user(self, request: dict):
         email = request["Email"]
         password = request["Password"]
-        pw_hash = hashlib.sha256(password.encode()).hexdigest()
         try:
-            with self.db_lock:
-                user_data = self.db.conn.execute(
-                    "SELECT * FROM users WHERE email=? AND password=?",
-                    (email, pw_hash)
-                ).fetchone()
+            user_data = self.db.conn.execute(
+                "SELECT * FROM users WHERE email=? AND password=?",
+                (email, password)
+            ).fetchone()
 
             if user_data:
                 active_rooms_copy = self.get_room_inf()
@@ -273,14 +410,35 @@ class Master:
         room_name = request["room_name"]
         room_ip = request["ip"]
         room_port = request["port"]
+        location = request["location"]
+        capacity = request["capacity"]
 
         try:
             bookings_list = {}
-            with self.db_lock:
-                room_data = self.db.conn.execute(
-                    "SELECT * FROM rooms WHERE id=?",
+            room_data = self.db.conn.execute(
+                "SELECT * FROM rooms WHERE id=?",
+                (room_id,)
+            ).fetchone()
+
+            if not room_data:
+                new_room = Room(room_name, location, capacity, status="Available")
+                self.db.create_room(new_room)
+            else:
+                self.db.conn.execute(
+                    "UPDATE rooms SET room_name = ?, location = ?, capacity = ? WHERE id = ?",
+                    (room_name, location, capacity, room_id)
+                )
+                self.db.conn.commit()
+                room_bookings = self.db.conn.execute(
+                    "SELECT * FROM bookings WHERE room_id=?",
                     (room_id,)
-                ).fetchone()
+                ).fetchall()
+                for booking in room_bookings:
+                    bookings_list[f"booking_{booking['start_time']}"] = {
+                        "start_time": booking["start_time"],
+                        "end_time": booking["end_time"],
+                        "token": booking["token"]
+                    }
 
                 if not room_data:
                     new_room = Room(room_name,"", 0, status="Available")
@@ -297,13 +455,14 @@ class Master:
                             "token": booking["token"]
                         }
 
-            with self.rooms_lock:
                 self.active_rooms[room_id] = {
                     "id": room_id,
                     "room_name": room_name,
                     "ip": room_ip,
                     "port": room_port,
-                    "status": request["status"]
+                    "status": request["status"],
+                    "location": location,
+                    "capacity": capacity
                 }
 
             return {
@@ -322,43 +481,75 @@ class Master:
     # Room Booking
     # -------------------------
     def book_room(self, request: dict):
-        with self.db_lock:
-            user_id = self.db.conn.execute(
-                "SELECT id FROM users WHERE user_token=?",
-                (request["token"],)
-            ).fetchone()["id"]
+        user_id = self.db.conn.execute(
+            "SELECT id FROM users WHERE user_token=?",
+            (request["token"],)
+        ).fetchone()["id"]
 
         room_id = request["room_id"]
-        start_time = request["starttime"]
-        end_time = request["endtime"]
-        token = request["token"]
+        start_time = datetime.fromisoformat(request["starttime"])
+        duration_seconds = request["duration"]
+        end_time = start_time + timedelta(seconds=duration_seconds)
+        booking_access_token = secrets.token_hex(16)
+
         booking = Booking(user_id=user_id, room_id=room_id,
-                          start_time=start_time, end_time=end_time, token=token)
+                          start_time=start_time, end_time=end_time, token=booking_access_token)
+
+        overlapping_bookings = self.db.conn.execute(
+            """SELECT * FROM bookings 
+            WHERE room_id = ? AND (start_time < ? AND end_time > ?)
+            """,
+            (room_id, end_time, start_time)
+        ).fetchall()
+
+        if overlapping_bookings:
+            return {
+                "op": "LOG", "action": "booking", "type": "failure",
+                "room_id": room_id, "reason": "Time slot not available"
+            }
+
         try:
-            with self.db_lock:
-                booking_id = self.db.create_booking(booking)
+            booking_id = self.db.create_booking(booking)
+
+            # Update room status in DB
+            self.db.conn.execute(
+                "UPDATE rooms SET status = ? WHERE id = ?",
+                ("Booked", room_id)
+            )
+            self.db.conn.commit()
+
+            # Publish MQTT message to room
+            mqtt_payload = {
+                "op": "UPDATE_STATUS",
+                "status": "Booked"
+            }
+            self.mqtt_client.publish(config.TOPIC_ROOM_COMMAND_PREFIX + f"{room_id}/command", json.dumps(mqtt_payload))
+
             return {
                 "op": "LOG", "action": "booking",
                 "type": "success", "message": "Booking successful",
-                "booking_id": booking_id, "room id": request['room_id']
+                "booking_id": booking_id, "room_id": request['room_id'],
+                "booking_access_token": booking_access_token
             }
         except Exception as e:
+            print(f"MASTER | Booking failed: {e}") # Add this
             return {
                 "op": "LOG", "action": "booking", "type": "failure",
                 "room_id": room_id, "reason": f"Booking failed: {e}"
             }
 
-    def get_bookings(self, token: str):
-        print("[DEBUG] Entering get_bookings with token:", token)
+    def get_bookings(self, user_token: str):
         try:
-            with self.db_lock:
-                now = datetime.now(ZoneInfo("Australia/Melbourne")).replace(tzinfo=None)
-                print("[DEBUG] Executing SQL query...")
-                bookings_data = self.db.conn.execute(
-                    "SELECT * FROM bookings WHERE token=? AND end_time > ? ORDER BY start_time ASC",
-                    (token, now)
-                ).fetchall()
-                print("[DEBUG] Query executed. Rows fetched:", len(bookings_data))
+            user_id = self.db.conn.execute(
+                "SELECT id FROM users WHERE user_token=?",
+                (user_token,)
+            ).fetchone()["id"]
+
+            now = datetime.now().replace(microsecond=0)
+            bookings_data = self.db.conn.execute(
+                "SELECT * FROM bookings WHERE user_id=? AND end_time > ? ORDER BY start_time ASC",
+                (user_id, now)
+            ).fetchall()
 
             bookings_list = []
             for booking in bookings_data:
@@ -372,7 +563,8 @@ class Master:
                         "end_time": datetime.fromisoformat(booking["end_time"]).strftime("%H:%M"),
                         "full_start_time": datetime.fromisoformat(booking["start_time"]).strftime("%Y-%m-%dT%H:%M"),
                         "full_end_time": datetime.fromisoformat(booking["end_time"]).strftime("%Y-%m-%dT%H:%M"),
-                        "status": booking["status"]
+                        "status": booking["status"],
+                        "booking_access_token": booking["token"]
                     })
 
             response = {
@@ -381,7 +573,6 @@ class Master:
                 "type": "success",
                 "bookings": bookings_list
             }
-            print("[DEBUG] Returning response:", response)
             return response
 
         except Exception as e:
@@ -390,107 +581,145 @@ class Master:
 
 
     def check_in(self, request: dict):
-        with self.db_lock:
-            booking_id = request["booking_id"]
-            booking = self.db.conn.execute(
-                "SELECT * FROM bookings WHERE id=? and status='Booked'",
-                (booking_id,)
-            ).fetchone()
-            if not booking:
-                return {
-                    "op": "LOG", "action": "check in", "type": "failure",
-                    "reason": "Check-in failed: Invalid booking ID or already checked in/out"
-                }
-            else:
-                self.db.conn.execute(
-                            "UPDATE bookings SET status = ? WHERE id=?",
-                            ("checked in", booking_id)
-                        )
-                self.db.conn.commit()
-                return {
-                    "op": "LOG", "action": "check in", "type": "success",
-                    "message": "Check-in successful", "booking_id": booking_id, "room id": request['room_id']
-                }   
+        booking_id = request["booking_id"]
+        booking = self.db.conn.execute(
+            "SELECT * FROM bookings WHERE id=? and status='Booked'",
+            (booking_id,)
+        ).fetchone()
+        if not booking:
+            return {
+                "op": "LOG", "action": "check in", "type": "failure",
+                "reason": "Check-in failed: Invalid booking ID or already checked in/out"
+            }
+        else:
+            room_id = booking['room_id']
+            self.db.conn.execute(
+                        "UPDATE bookings SET status = ? WHERE id=?",
+                        ("checked in", booking_id)
+                    )
+            self.db.conn.commit()
+
+            # Publish MQTT message to room
+            mqtt_payload = {
+                "op": "UPDATE_STATUS",
+                "status": "Occupied"
+            }
+            self.mqtt_client.publish(config.TOPIC_ROOM_COMMAND_PREFIX + f"{room_id}/command", json.dumps(mqtt_payload))
+
+            return {
+                "op": "LOG", "action": "check in", "type": "success",
+                "message": "Check-in successful", "booking_id": booking_id, "room id": room_id
+            }   
+
     def check_out(self, request: dict):
-        with self.db_lock:
-            booking_id = request["booking_id"]
-            booking = self.db.conn.execute(
-                "SELECT * FROM bookings WHERE id=? and status='checked in'",
-                (booking_id,)
-            ).fetchone()
-            if not booking:
-                return {
-                    "op": "LOG", "action": "check out", "type": "failure",
-                    "reason": "Check-out failed: Invalid booking ID or not checked in"
-                }
-            else:
-                self.db.conn.execute(
-                            "UPDATE bookings SET status = ? WHERE id=?",
-                            ("checked out", booking_id)
-                        )
-                self.db.conn.commit()
-                return {
-                    "op": "LOG", "action": "check out", "type": "success",
-                    "message": "Check-out successful", "booking_id": booking_id, "room id": request['room_id']
-                }
+        booking_id = request["booking_id"]
+        booking = self.db.conn.execute(
+            "SELECT * FROM bookings WHERE id=? and status='checked in'",
+            (booking_id,)
+        ).fetchone()
+        if not booking:
+            return {
+                "op": "LOG", "action": "check out", "type": "failure",
+                "reason": "Check-out failed: Invalid booking ID or not checked in"
+            }
+        else:
+            room_id = booking['room_id']
+            self.db.conn.execute(
+                        "UPDATE bookings SET status = ? WHERE id=?",
+                        ("checked out", booking_id)
+                    )
+            self.db.conn.commit()
+
+            # Publish MQTT message to room
+            mqtt_payload = {
+                "op": "UPDATE_STATUS",
+                "status": "Available"
+            }
+            self.mqtt_client.publish(config.TOPIC_ROOM_COMMAND_PREFIX + f"{room_id}/command", json.dumps(mqtt_payload))
+
+            return {
+                "op": "LOG", "action": "check out", "type": "success",
+                "message": "Check-out successful", "booking_id": booking_id, "room id": room_id
+            }
 
     def cancel_booking(self, request: dict):
         print("Entering cancel_booking with request:", request)
         booking_id = request["booking_id"]
         token = request["token"]
         print(booking_id, token)
-        with self.db_lock:
-            booking = self.db.conn.execute(
-                "SELECT * FROM bookings WHERE id=? and token=? and status='Booked'",
-                (booking_id, token)
-            ).fetchone()
-            if not booking:
-                return {
-                    "op": "LOG", "action": "cancel booking", "type": "failure",
-                    "reason": "Cancellation failed: Invalid booking ID, token, or booking already checked in/out"
-                }
-            else:
-                self.db.conn.execute(
-                            "DELETE FROM bookings WHERE id=?",
-                            (booking_id, )
-                        )
-                self.db.conn.commit()
-                return {
-                    "op": "LOG", "action": "cancel booking", "type": "success",
-                    "message": "Booking cancelled successfully", "booking_id": booking_id, "room id": request["room_id"]
-                }
+        booking = self.db.conn.execute(
+            "SELECT * FROM bookings WHERE id=? and token=? and status='Booked'",
+            (booking_id, token)
+        ).fetchone()
+        if not booking:
+            return {
+                "op": "LOG", "action": "cancel booking", "type": "failure",
+                "reason": "Cancellation failed: Invalid booking ID, token, or booking already checked in/out"
+            }
+        else:
+            self.db.conn.execute(
+                        "DELETE FROM bookings WHERE id=?",
+                        (booking_id, )
+                    )
+            self.db.conn.commit()
+            return {
+                "op": "LOG", "action": "cancel booking", "type": "success",
+                "message": "Booking cancelled successfully", "booking_id": booking_id, "room id": request["room_id"]
+            }
+
+    def validate_booking_token(self, request: dict):
+        room_id = request["room_id"]
+        booking_access_token = request["booking_access_token"]
+        now = datetime.now(ZoneInfo("Australia/Melbourne")).replace(tzinfo=None)
+
+        booking = self.db.conn.execute(
+            """SELECT * FROM bookings 
+            WHERE room_id = ? AND token = ? AND start_time <= ? AND end_time > ? AND status = 'Booked'
+            """,
+            (room_id, booking_access_token, now, now)
+        ).fetchone()
+
+        if booking:
+            return {
+                "op": "LOG", "action": "validate token", "type": "success",
+                "message": "Token is valid", "booking_id": booking["id"], "room_id": room_id
+            }
+        else:
+            return {
+                "op": "LOG", "action": "validate token", "type": "failure",
+                "reason": "Invalid or expired token for this room", "room_id": room_id
+            }
 
     # -------------------------
     # Logging Operations
     # -------------------------
     def log_create(self, log):
         if log["op"] == "LOG":
-            with self.db_lock:
-                if log["type"] == "success":
-                    msg = ""
-                    if log["action"] == "register":
-                        msg = f"User {log['user_id']} registered successfully."
-                        self.db.create_log(log["user_id"], "register", msg)
-                    elif log["action"] == "log in":
-                        msg = f"User {log['user_id']} logged in successfully."
-                        self.db.create_log(log["user_id"], "log in", msg)
-                    elif log["action"] == "room connection":
-                        msg = f"Room {log['room id']} connected successfully."
-                        self.db.create_log(None, "room connection", msg)
-                    elif log["action"] == "check in":
-                        msg = f"User checked in to room {log['room id']} successfully."
-                        self.db.create_log(None, "check in", msg)
-                    elif log["action"] == "check out":
-                        msg = f"User checked out of room {log['room id']} successfully."
-                        self.db.create_log(None, "check out", msg)
-                    elif log["action"] == "booking":
-                        msg = f"Room {log['room id']} booked successfully."
-                        self.db.create_log(None, "booking", msg)
-                    elif log["action"]== "cancel booking":
-                        msg = f"Booking {log['booking_id']} on room {log['room id']} has been canceled"
-                        self.db.create_log(None, "cancel booking", msg)
-                elif log["type"] == "failure":
-                    self.db.create_log(None, log["action"], log["reason"])
+            if log["type"] == "success":
+                msg = ""
+                if log["action"] == "register":
+                    msg = f"User {log['user_id']} registered successfully."
+                    self.db.create_log(log["user_id"], "register", msg)
+                elif log["action"] == "log in":
+                    msg = f"User {log['user_id']} logged in successfully."
+                    self.db.create_log(log["user_id"], "log in", msg)
+                elif log["action"] == "room connection":
+                    msg = f"Room {log['room_id']} connected successfully."
+                    self.db.create_log(None, "room connection", msg)
+                elif log["action"] == "check in":
+                    msg = f"User checked in to room {log['room_id']} successfully."
+                    self.db.create_log(None, "check in", msg)
+                elif log["action"] == "check out":
+                    msg = f"User checked out of room {log['room_id']} successfully."
+                    self.db.create_log(None, "check out", msg)
+                elif log["action"] == "booking":
+                    msg = f"Room {log['room_id']} booked successfully."
+                    self.db.create_log(None, "booking", msg)
+                elif log["action"]== "cancel booking":
+                    msg = f"Booking {log['booking_id']} on room {log['room_id']} has been canceled"
+                    self.db.create_log(None, "cancel booking", msg)
+            elif log["type"] == "failure":
+                self.db.create_log(None, log["action"], log["reason"])
 
     def _handle_client(self, conn: socket.socket, addr: Tuple[str, int]) -> None:
         try:
@@ -531,52 +760,21 @@ class Master:
                 response = self.get_booking_logs()
             elif request['op'] == 'GET BOOKING COUNT':
                 response = self.get_booking_count()
-            elif request["op"] == "LOG":
-                print(request["action"])
-                if request["type"] == "success" and request["action"] == "booking":
-                    response = self.book_room(request)
-                    print(response)
-                elif request["type"] == "success" and request["action"] == "check in":
-                    response  = self.check_in(request)
-                    print(response)
-                elif request["type"] == "success" and request["action"] == "check out":
-                    response = self.check_out(request)
-                    print(response)
-                elif request["type"] == "success" and request["action"] == "cancel booking":
-                    response = self.cancel_booking(request)
-                else:
-                    response = request
-            elif request["op"] == "SENSOR_DATA":
-                room_id = request["room_id"]
-                temperature = request["temperature"]
-                humidity = request["humidity"]
-                pressure = request["pressure"]
-                status = request["status"]
-                timestamp = datetime.fromtimestamp(request["timestamp"])
-
-                # Update shared memory safely
-                with self.rooms_lock:
-                    if room_id in self.active_rooms:
-                        self.active_rooms[room_id]["status"] = status
-
-                # Update database safely
-                with self.db_lock:
-                    self.db.conn.execute(
-                        "UPDATE rooms SET status = ? WHERE id=?",
-                        (status, room_id)
-                    )
-                    self.db.conn.execute(
-                        "INSERT INTO sensor_data (room_id, timestamp, temperature, humidity, pressure) VALUES (?, ?, ?, ?, ?)",
-                        (room_id, timestamp, temperature, humidity, pressure)
-                    )
-                    self.db.conn.commit()
-
-                response = {
-                    "op": "LOG", "action": "sensor_update",
-                    "type": "success", "room_id": room_id
-                }
+            elif request["op"] == "BOOK_ROOM":
+                response = self.book_room(request)
+            elif request["op"] == "CHECK_IN":
+                response = self.check_in(request)
+            elif request["op"] == "CHECK_OUT":
+                response = self.check_out(request)
+            elif request["op"] == "CANCEL_BOOKING":
+                response = self.cancel_booking(request)
             elif request["op"] == "GET_BOOKINGS":
                 response = self.get_bookings(request["token"])
+            elif request["op"] == "GET_ROOMS":
+                rooms_data = self.get_room_inf()
+                response = {"op": "GET_ROOMS", "type": "success", "rooms": rooms_data}
+            elif request["op"] == "VALIDATE_BOOKING_TOKEN":
+                response = self.validate_booking_token(request)
             else:
                 response = {
                     "op": request.get("op"),
@@ -585,8 +783,8 @@ class Master:
                 }
             print(response)
             self.log_create(response)
-            print(response)
-            conn.sendall(json.dumps(response).encode())
+            print(f"MASTER | Sending response: {json.dumps(response)}") # Add this line
+            conn.sendall(json.dumps(response).encode()) # Sends the response
 
         except Exception as e:
             error_response = {"op": "LOG", "type": "failure", "reason": str(e)}
@@ -626,6 +824,10 @@ class Master:
         self.socket_server_thread.daemon = True
         self.socket_server_thread.start()
 
+        self.mqtt_subscriber_thread = threading.Thread(target=self._mqtt_subscriber_thread)
+        self.mqtt_subscriber_thread.daemon = True
+        self.mqtt_subscriber_thread.start()
+
         print("Master server started.")
         while self.running:
             time.sleep(1)
@@ -633,6 +835,7 @@ class Master:
 
     def stop(self):
         self.running = False
+        self.mqtt_client.disconnect()
         print("Master server stopped.")
 
 

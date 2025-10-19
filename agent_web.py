@@ -1,11 +1,14 @@
+from typing import List
 from agent import Agent
 import re
 import sys
 import os
 import json
+
+from models.room import Room
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from datetime import datetime, timedelta
-from flask import Flask, render_template, request, redirect, url_for, session, flash
+from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify, jsonify
 import socket
 from config import SOCKET_HOST, SOCKET_PORT
 
@@ -21,7 +24,15 @@ def send_to_master(message):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.connect((SOCKET_HOST, SOCKET_PORT))
         s.sendall(message.encode())
-        response = s.recv(1024).decode()
+        
+        # Receive all data until connection is closed
+        total_data = []
+        while True:
+            data = s.recv(4096) # Receive in chunks
+            if not data:
+                break
+            total_data.append(data.decode())
+        response = "".join(total_data)
         return response
 
 def send_to_room(ip, port, message):
@@ -134,9 +145,7 @@ def home():
 
 @app.route("/logout")
 def logout():
-    session.pop("user_email", None)
-    session.pop("user_id", None)
-    session.pop("user_role", None)
+    session.clear()
     flash("You have been logged out.")
     return redirect(url_for("index"))    
 
@@ -159,26 +168,22 @@ def booking():
         # Convert and compute endtime
         starttime = datetime.fromisoformat(starttime_str)
 
-
         booking_request = {
             "op": "BOOK_ROOM",
+            "room_id": room_id,
             "starttime": starttime.isoformat(),
             "duration": duration_hours * 3600,  
             "token": session["token"]
         }
-        room_ip = session["rooms"][f"{room_id}"]["ip"]
-        print(room_ip)
-        room_port = session["rooms"][f"{room_id}"]["port"]
-        print(room_port)
         msg = json.dumps(booking_request)
-        print(msg)
-        response = json.loads(send_to_room(room_ip,room_port,msg))
+        response = json.loads(send_to_master(msg))
         if response["type"] == "success":
-            flash("Room booked successfully.")
+            booking_access_token = response.get("booking_access_token")
+            flash(f"Room booked successfully. Your booking access token is: {booking_access_token}")
+            return redirect(url_for("home"))
         else:
-            flash("Failed to book the room." + response["reason"])
-
-        return redirect(url_for("home"))
+            flash(f"Failed to book the room: {response['reason']}")
+            return redirect(url_for("booking"))
      
     msg = {"op": "UPDATE_ROOMS"}  
     response = json.loads(send_to_master(json.dumps(msg)))
@@ -211,56 +216,96 @@ def handle_bookings():
         return redirect(url_for("login"))
     booking_id = request.form.get("booking_id")
     room_id = request.form.get("room_id")
-    full_date = request.form.get("full_date")
-    end_time = request.form.get("end_time")
-    full_date = datetime.strptime(full_date, "%Y-%m-%dT%H:%M").isoformat()
-    room_ip = session["rooms"][f"{room_id}"]["ip"]
-    room_port = session["rooms"][f"{room_id}"]["port"]
     action = request.form.get("action")
-    print(full_date)
     if action == "cancel":
         msg = {
             "op": "CANCEL_BOOKING",
             "booking_id": booking_id,
-            "starttime": full_date,
             "token": session["token"]
         }
         msg = json.dumps(msg)
-        print(msg)
-        response = json.loads(send_to_room(room_ip,room_port,msg))
+        response = json.loads(send_to_master(msg))
         if response["type"] == "success":
             flash("Booking cancelled successfully.")
         else:
             flash("Failed to cancel booking.")
 
     elif action == "check_in":
-        msg = {
-            "op": "CHECK_IN",
-            "booking_id": booking_id,
-            "starttime": full_date,
-            "endtime": end_time,
-            "token": session["token"]
+        booking_access_token = request.form["booking_access_token"]
+        room_id = request.form["room_id"]
+
+        validation_msg = {
+            "op": "VALIDATE_BOOKING_TOKEN",
+            "room_id": room_id,
+            "booking_access_token": booking_access_token
         }
-        
-        response = json.loads(send_to_room(room_ip,room_port,json.dumps(msg)))
-        if response["type"] == "success":
-            flash("Checked in successfully.")
+        validation_response = json.loads(send_to_master(json.dumps(validation_msg)))
+
+        if validation_response["type"] == "success":
+            validated_booking_id = validation_response["booking_id"]
+            msg = {
+                "op": "CHECK_IN",
+                "booking_id": validated_booking_id,
+                "token": session["token"]
+            }
+            response = json.loads(send_to_master(json.dumps(msg)))
+            if response["type"] == "success":
+                flash("Checked in successfully.")
+            else:
+                flash(f"Failed to check in: {response['reason']}")
         else:
-            flash("Failed to check in.")
+            flash(f"Check-in failed: {validation_response['reason']}")
     elif action == "check_out":
         msg = {
             "op": "CHECK_OUT",
             "booking_id": booking_id,
-            "starttime": full_date,
             "token": session["token"]
         }
-        response = json.loads(send_to_room(room_ip,room_port,json.dumps(msg)))
+        response = json.loads(send_to_master(json.dumps(msg)))
         if response["type"] == "success":
             flash("Checked out successfully.")
         else:
             flash("Failed to check out.")
 
     return redirect(url_for("home"))
+
+
+@app.route("/api/rooms")
+def api_rooms():
+    if "token" not in session:
+        return jsonify({"error": "Not authenticated"}), 401
+    
+    msg = {
+        "op": "GET_ROOMS"
+    }
+    response_str = send_to_master(json.dumps(msg))
+    try:
+        response = json.loads(response_str)
+        if response.get("type") == "success":
+            return jsonify(response.get("rooms", {}))
+        else:
+            return jsonify({"error": "Failed to retrieve rooms", "details": response.get("reason")}), 500
+    except (json.JSONDecodeError, AttributeError):
+        return jsonify({"error": "Invalid response from master"}), 500
+
+@app.route("/api/my-bookings")
+def api_my_bookings():
+    if "token" not in session:
+        return jsonify({"error": "Not authenticated"}), 401
+    
+    msg = {
+        "op": "GET_BOOKINGS",
+        "token": session["token"]
+    }
+    response_str = send_to_master(json.dumps(msg))
+    try:
+        response = json.loads(response_str)
+        if response.get("type") == "success":
+            return jsonify(response.get("bookings", []))
+        else:
+            return jsonify({"error": "Failed to retrieve bookings", "details": response.get("reason")}), 500
+    except (json.JSONDecodeError, AttributeError):
+        return jsonify({"error": "Invalid response from master"}), 500
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=7001, debug=True)
